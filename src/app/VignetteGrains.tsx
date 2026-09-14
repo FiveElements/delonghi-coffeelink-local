@@ -290,6 +290,36 @@ export function ChoixTorrefaction({
 }
 
 /**
+ * Le visuel d'un niveau de torréfaction, pour un questionnaire.
+ *
+ * Jumeau exact d'`ImageCrema`, et pour la même raison : le contrôle voisin porte déjà le libellé,
+ * d'où `aria-hidden` — l'annoncer ferait entendre deux fois « très foncée ». C'est ce dont a besoin
+ * la question `prequestion_2` du parcours de création, qui pose la torréfaction comme une question à
+ * quatre réponses et non comme le rail à cinq crans d'un formulaire : `ChoixTorrefaction` porte son
+ * étiquette, son cran « non précisée » et sa largeur de colonne, aucun des trois n'ayant de sens
+ * dans un dialogue qui exige une réponse.
+ *
+ * Rend `null` quand le fichier manque — le cas d'un dépôt sans import : le questionnaire doit
+ * rester lisible sans une seule de ces images.
+ */
+export function ImageTorrefaction({ niveau, className = "" }: { niveau: number; className?: string }) {
+  const [absente, setAbsente] = useState(false);
+  const fichier = fichierTorrefaction(niveau);
+  if (!fichier || absente) return null;
+  return (
+    <img
+      src={urlGrain(fichier)}
+      alt=""
+      aria-hidden="true"
+      className={className}
+      loading="lazy"
+      decoding="async"
+      onError={() => setAbsente(true)}
+    />
+  );
+}
+
+/**
  * Le visuel d'un aspect de crema, pour l'assistant.
  *
  * Rien de plus qu'une image nommée : le sélecteur voisin porte déjà le libellé, et c'est lui qui

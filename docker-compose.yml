@@ -13,7 +13,7 @@ services:
     #   :edge    suit la branche principale, publiée à chaque poussée dont la CI passe ;
     #   :latest  dernière version étiquetée `v*` (n'existe qu'après la première release) ;
     #   :0.1.0   une version précise, à préférer en production.
-    image: ghcr.io/jmorille/delonghi-coffeelink-local:edge
+    image: ghcr.io/fiveelements/delonghi-coffeelink-local:edge
     # Pour construire localement au lieu de tirer l'image, décommentez :
     # build: .
     container_name: delonghi-lan-server

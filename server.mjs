@@ -34,7 +34,7 @@ import {
 // boisson en montre le résultat à chaque cran de curseur, et une seconde implémentation côté
 // navigateur aurait dérivé en silence. Voir l'en-tête de `trame-boisson.mjs`.
 import { encodeDispense, MODE, ACT, actionPreparer } from "./src/lib/trame-boisson.mjs";
-import { computeBeanAdapt, encodeBeanName, GRINDER_MIN, GRINDER_MAX, AROMA_MIN, AROMA_MAX, TEMPERATURE_MIN, TEMPERATURE_MAX, seuilAffinage, affinagePermis } from "./src/lib/bean-adapt.mjs";
+import { computeBeanAdapt, composeGrainNeuf, encodeBeanName, GRINDER_MIN, GRINDER_MAX, AROMA_MIN, AROMA_MAX, TEMPERATURE_MIN, TEMPERATURE_MAX, seuilAffinage, affinagePermis } from "./src/lib/bean-adapt.mjs";
 import { ALL_PROFILE_PROPS, PROFILE_NAME_PROPS, CUSTOM_NAME_PROPS, PRIORITY_PROPS, profilePropInfo, isProfileProp, decodeNames, decodePriorities, decodeChecksums, decodeBeanSystem, decodeBeanSync, BEAN_SYNC_PROP, BEAN_SYNC_PARAM, STRIDE_CLASSIC } from "./src/lib/profiles.mjs";
 import { decodeMonitor } from "./src/lib/monitor.mjs";
 import { makeLanSession, token } from "./src/lib/lansession.mjs";
@@ -4011,7 +4011,7 @@ const NEEDS_MACHINE = [
  * ⚠️ Liste d'exceptions EXACTES, jamais de préfixes : une exemption qui s'étendrait à ce qui vient
  * après elle finirait par dispenser une écriture, et le ferait en silence.
  */
-const SANS_MACHINE = new Set(["/api/beanadapt/simulate"]);
+const SANS_MACHINE = new Set(["/api/beanadapt/simulate", "/api/beanadapt/creation"]);
 
 /**
  * Autres entrées qui désignent visiblement le MÊME appareil.
@@ -5702,6 +5702,32 @@ async function handleApi(req, res) {
       return raw(res, JSON.stringify({ error: "temps d'écoulement invalide" }), 400);
     }
     return raw(res, JSON.stringify(computeBeanAdapt(current, { flowTime, crema: Number(b.crema), taste: Number(b.taste) })));
+  }
+
+  /**
+   * **Le premier réglage d'un grain neuf — mélange × torréfaction, calcul pur.**
+   *
+   * Pendant de `simulate` pour l'autre moitié du parcours De'Longhi : celui-ci ne corrige pas un
+   * grain, il en compose un. Comme lui il ne construit aucune trame, ne met rien en file et
+   * n'attend rien de l'appareil — d'où sa place dans `SANS_MACHINE`, et la possibilité d'ouvrir le
+   * questionnaire de création avant même qu'une machine soit configurée.
+   *
+   * ⚠️ **Pourquoi un aller-retour serveur pour trois additions.** `bean-adapt.mjs` fait un
+   * `Buffer.alloc` dans `encodeBeanName` : l'importer depuis une page embarquerait `Buffer` dans le
+   * paquet du navigateur, ce qui est exactement le piège qui a laissé `/pilotage` blanc quand
+   * `ecam-args.mjs` en gardait un (voir CLAUDE.md). La règle reste donc du côté où elle est
+   * vérifiée, et l'écran n'en détient aucune copie — la même raison qui vaut pour l'affinage.
+   *
+   * Les erreurs de `composeGrainNeuf` sont des refus d'entrée, pas des pannes : elles remontent en
+   * 400 avec leur propre phrase, qui nomme la réponse fautive et les options attendues.
+   */
+  if (url === "/api/beanadapt/creation" && req.method === "POST") {
+    const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+    try {
+      return raw(res, JSON.stringify(composeGrainNeuf({ melange: Number(b.melange), torrefaction: Number(b.torrefaction) })));
+    } catch (e) {
+      return raw(res, JSON.stringify({ error: e.message }), 400);
+    }
   }
 
   // Écriture d'un profil Bean System dans la machine (0xBB). Persistant.

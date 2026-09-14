@@ -274,7 +274,7 @@ Deux fichiers à côté l'un de l'autre : `compose.yaml` et `.env.local`.
 # compose.yaml
 services:
   lan-server:
-    image: ghcr.io/jmorille/delonghi-coffeelink-local:edge
+    image: ghcr.io/fiveelements/delonghi-coffeelink-local:edge
     container_name: delonghi-lan-server
     restart: unless-stopped
 
@@ -333,7 +333,7 @@ clé. Rien d'autre n'est nécessaire.
 ```yaml
 services:
   lan-server:
-    image: ghcr.io/jmorille/delonghi-coffeelink-local:edge
+    image: ghcr.io/fiveelements/delonghi-coffeelink-local:edge
     network_mode: host
     env_file: [.env.local]
     volumes:

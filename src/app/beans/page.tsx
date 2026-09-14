@@ -8,6 +8,7 @@ import { useConfirm } from "../confirm";
 import ReglagesGrains, { type Bound, type Brouillon } from "../ReglagesGrains";
 import CarteGrain from "../CarteGrain";
 import AffinageDialog from "../AffinageDialog";
+import CreationGrainDialog from "../CreationGrainDialog";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card } from "@/ui/card";
@@ -60,17 +61,6 @@ interface Preset {
   imageAt: number | null;
   /** Niveau de torréfaction déclaré, 1 (clair) à 4 (foncé), `null` s'il ne l'est pas. */
   roast: number | null;
-}
-
-/**
- * Le milieu d'une plage, pour amorcer une configuration neuve.
- *
- * Replié sur 1 tant que les bornes ne sont pas arrivées : la carte de création reste utilisable
- * avant la première réponse du serveur, et la valeur sera de toute façon revérifiée à
- * l'enregistrement, où c'est le serveur qui tranche.
- */
-function milieu(b?: Bound): number {
-  return b ? Math.round((b.min + b.max) / 2) : 1;
 }
 
 /**
@@ -172,8 +162,15 @@ export default function Beans() {
    * `selected` marcherait jusqu'au jour où l'on ouvrirait l'affinage sans ouvrir la carte.
    */
   const [affinage, setAffinage] = useState<number | null>(null);
-  /** Création en cours dans la carte « + », `null` quand elle est fermée. */
-  const [nouveau, setNouveau] = useState<Brouillon | null>(null);
+  /**
+   * Le questionnaire de création est-il ouvert ?
+   *
+   * Un booléen et non un brouillon : la carte portait le brouillon parce qu'elle l'éditait
+   * elle-même. Le parcours est maintenant dans `CreationGrainDialog`, qui construit son brouillon à
+   * partir de la règle une fois les deux questions posées — un brouillon vivant ici serait rempli
+   * avant que la moindre réponse soit donnée.
+   */
+  const [creation, setCreation] = useState(false);
   /**
    * La configuration mémorisée dont le dos est ouvert, et son brouillon.
    *
@@ -270,13 +267,25 @@ export default function Beans() {
           ...(image === undefined ? {} : { image }),
         }),
       }).then((x) => x.json());
-      if (r.error) setMsg({ text: tc("error", { message: r.error }), kind: "err" });
-      else {
-        dire(t("presetSaved", { name: r.preset.name || t("unnamed") }));
-        setNouveau(null);
-        setEdition(null);
-        await refresh();
+      if (r.error) {
+        setMsg({ text: tc("error", { message: r.error }), kind: "err" });
+        /**
+         * ⚠️ **L'erreur est aussi RENDUE, et pas seulement posée sur la page.**
+         *
+         * Le message de la page vit dans son `.status`, tout en bas — derrière le dialogue de
+         * création quand c'est lui qui a appelé. Un refus du serveur donnait donc un « Créer » qui
+         * ne fait rien, sans un mot : le pire des retours pour un bouton d'enregistrement. Les
+         * deux autres hôtes, eux, sont à même hauteur que le `.status` et n'ont rien à changer.
+         */
+        return String(r.error);
       }
+      dire(t("presetSaved", { name: r.preset.name || t("unnamed") }));
+      /* Le dialogue de création se ferme ICI et pas au clic : tant que le serveur n'a pas pris la
+         configuration, la refermer ferait perdre les réponses avec le message d'erreur. */
+      setCreation(false);
+      setEdition(null);
+      await refresh();
+      return null;
     } finally {
       setBusy(false);
     }
@@ -295,22 +304,6 @@ export default function Beans() {
    * (`s<index>` côté serveur) : un `b3` et un `s3` ne désignent pas le même objet.
    */
   const urlPhotoSlot = (bs: Bean) => murl(`/api/beans/visual/image?index=${bs.index}&v=${bs.imageAt}`);
-
-  /**
-   * Le brouillon d'une configuration neuve : le milieu de chaque plage.
-   *
-   * Un milieu plutôt qu'un minimum — le minimum est une valeur extrême que personne ne veut, et
-   * la donner comme point de départ ferait croire à un réglage lu quelque part.
-   */
-  const vide = (): Brouillon => ({
-    name: "",
-    grinder: milieu(data?.bounds.grinder),
-    temperature: milieu(data?.bounds.temperature),
-    aroma: milieu(data?.bounds.aroma),
-    /* Pas de torréfaction par défaut : les trois réglages ont un milieu de plage plausible, un
-       niveau de torréfaction n'en a pas. En proposer un ferait croire à une donnée lue. */
-    roast: null,
-  });
 
   /**
    * Ouvre une fiche en édition. `image` est laissée **absente** : tant qu'on n'y touche pas, la
@@ -889,53 +882,30 @@ export default function Beans() {
 
         {/* ------------------------------------------ créer une configuration de toutes pièces.
             **Une carte dans la grille, pas un bouton flottant** : c'est le motif de `/recettes`.
-            Un seul objet visuel par chose, et le même geste pour créer que pour modifier — d'où le
-            MÊME formulaire que celui d'un dos ouvert, `ReglagesGrains`.
+            Un seul objet visuel par chose.
 
-            ⚠️ **Elle ne se retourne pas, et il n'y a rien à retourner** : une configuration qui
-            n'existe pas encore n'a pas d'affiche. Elle prend donc la rangée entière (`.open`), comme
-            l'éditeur de recette, plutôt que de faire semblant d'être une carte de grain. */}
-        <Card className={nouveau ? "open" : undefined} key="nouvelle">
-          {!nouveau ? (
-            <>
-              <div className="cardHead">
-                <div className="titreLigne">
-                  <h3 className="cardTitle">{t("presetNew")}</h3>
-                </div>
-                <div className="row actions">
-                  <Button type="button" variant="neutre" size="commande" className="iconBtn" disabled={busy} onClick={() => setNouveau(vide())}>
-                    <Icone nom="ajouter" />
-                    <span className="lbl">{tc("new")}</span>
-                  </Button>
-                </div>
-              </div>
-              <p className="sub">{t("presetNewHint")}</p>
-            </>
-          ) : (
-            <>
-              <div className="cardHead">
-                {/* Le titre suit la saisie, et retombe sur « Nouvelle configuration » tant qu'il
-                    n'y a pas de nom — jamais sur un nom emprunté ailleurs. */}
-                <h3 className="cardTitle">{nouveau.name || t("presetNew")}</h3>
-              </div>
-              <ReglagesGrains
-                prefixe="nouvelle"
-                valeur={nouveau}
-                bounds={data?.bounds}
-                disabled={busy}
-                onChange={setNouveau}
-              />
-              <div className="row note">
-                {/* Rien ne part vers la machine : c'est la bibliothèque locale qu'on enrichit.
-                    L'écriture dans un emplacement reste la puce « #n » du dos de la carte créée. */}
-                <Button type="button" variant="neutre" size="commande" className="iconBtn" disabled={busy} onClick={() => void memorise(nouveau, undefined, nouveau.image)}>
-                  <Icone nom="ecrire" taille={14} />
-                  <span className="lbl">{t("presetCreate")}</span>
-                </Button>
-                <Button type="button" variant="neutre" size="coquille"  disabled={busy} onClick={() => setNouveau(null)}>{tc("cancel")}</Button>
-              </div>
-            </>
-          )}
+            ⚠️ **Elle ne se déplie plus, elle OUVRE le questionnaire.** Elle portait une copie de
+            `ReglagesGrains` sur trois curseurs posés au milieu de leur plage — et un milieu de plage
+            est un aveu : il dit « je n'ai aucune idée de ton café ». Deux questions le remplacent,
+            celles du parcours d'ajout de l'application officielle, et la page ne garde plus aucune
+            copie du formulaire. C'est la même leçon que « Réglage manuel », qui a vécu ici des mois
+            en double de ces cartes : le formulaire a UN lieu, et plusieurs portes.
+
+            ⚠️ **Elle ne se retourne pas non plus, et il n'y a rien à retourner** : une configuration
+            qui n'existe pas encore n'a pas d'affiche. */}
+        <Card key="nouvelle">
+          <div className="cardHead">
+            <div className="titreLigne">
+              <h3 className="cardTitle">{t("presetNew")}</h3>
+            </div>
+            <div className="row actions">
+              <Button type="button" variant="neutre" size="commande" className="iconBtn" disabled={busy} onClick={() => setCreation(true)}>
+                <Icone nom="ajouter" />
+                <span className="lbl">{tc("new")}</span>
+              </Button>
+            </div>
+          </div>
+          <p className="sub">{t("presetNewHint")}</p>
         </Card>
       </div>
 
@@ -944,6 +914,19 @@ export default function Beans() {
           rien ne disait dans quel ORDRE s'y prendre — or l'ordre est la moitié du sens ici. Le
           composant porte le pourquoi en détail ; ce qui compte à cet endroit-ci, c'est qu'il n'y a
           plus qu'UNE implémentation du questionnaire, et que la page n'en garde aucune copie. */}
+      {/* **Le parcours d'ajout, dans son propre dialogue.** Deux questions — le mélange, la
+          torréfaction — puis la configuration proposée par la règle et librement modifiable. Le
+          composant porte le pourquoi en détail ; ce qui compte à cet endroit-ci, c'est que la carte
+          « + » n'édite plus rien elle-même, et que la règle qui propose les trois valeurs est de
+          NOTRE main, pas celle de De'Longhi — le dialogue le dit à l'écran. */}
+      <CreationGrainDialog
+        ouvert={creation}
+        onFermer={() => setCreation(false)}
+        bounds={data?.bounds}
+        busy={busy}
+        onCreer={(b) => memorise(b, undefined, b.image)}
+      />
+
       <AffinageDialog
         ouvert={affinage !== null}
         onFermer={() => setAffinage(null)}

@@ -51,6 +51,7 @@ node scripts/verif-messages.mjs    # literal next-intl keys exist in messages/fr
 node scripts/verif-contraste.mjs   # WCAG + ΔL* of both finishes, read back out of globals.css
 node scripts/verif-images.mjs      # both artwork fingerprint chains — beverages AND beans (producer → table → URL → cache rule)
 node scripts/verif-datum-grains.mjs # sniffing a bean photo pulled from the Ayla datum (type from bytes, not from a claim)
+node scripts/verif-bean-adapt.mjs  # BOTH Bean Adapt rules, each against a recorded matrix: refine on 9 cells, create on all 8
 node scripts/verif-surfaces.mjs    # the 12 surfaces in a REAL headless Chrome (see § Styling)
 ```
 
@@ -77,6 +78,7 @@ node scripts/extract-models.mjs                    # regenerate the APK-derived 
 node scripts/extract-catalogs.mjs
 node scripts/extract-images.mjs
 node scripts/import-bean-images.mjs                # bean artwork, from De'Longhi's S3 (--json replays it offline)
+node scripts/extract-bean-creation.mjs             # the 8 cells of getBeanSystem.sr (--brut replays them offline)
 ```
 
 `.github/workflows/ci.yml` runs all of the above plus the SQLite migration chain (v1→v2→v3 on
@@ -111,7 +113,7 @@ type-check, so they look alive. The live implementations are the `.mjs` siblings
 | `monitor.mjs` | real-time state / sensor / alarm decoding |
 | `compteurs.mjs` | the named-counter table: which Ayla property counts what, and how to read its value |
 | `profiles.mjs` | profile names, favourites, checksums, Bean System |
-| `bean-adapt.mjs` | the grind/temp/aroma adjustment rule, re-implemented locally |
+| `bean-adapt.mjs` | **two** rules, both De'Longhi's: `computeBeanAdapt` refines an existing bean (a rule derived by sweeping the backend), `composeGrainNeuf` composes a new one (a recorded 8-cell table, `bean-creation.json`) |
 | `lansession.mjs` | LAN session crypto, both roles (client *and* device) |
 | `appregistry.mjs` + `appproxy.mjs` | multiplexer state and payloads |
 | `machine-models.mjs` | model identification from the serial number |
@@ -223,6 +225,55 @@ which the machine never stores — live in `meta`: inside each preset for a pres
 `meta.beanRoasts` keyed by index for a slot. A slot's visual follows the **index**, not the bean:
 nothing tells us the appliance was renamed.
 
+### Bean Adapt is TWO rules, and each is verified against a recording
+
+The appliance's own flow has two halves, and they ask different questions:
+
+| | Questions | De'Longhi endpoint | Ours |
+|---|---|---|---|
+| **refine** an existing bean | crema (`question_1`), taste (`question_2`), measured flow time | `getBeanSystemAdv.sr` | `computeBeanAdapt` |
+| **create** a new bean | blend (`prequestion_1`), roast (`prequestion_2`) | `getBeanSystem.sr` | `composeGrainNeuf` |
+
+The refine rule is a *rule*, derived by sweeping the backend and replayed against a nine-cell
+matrix (`docs/bean-adapt.md` §4.4). The creation rule is a **table**: the input space is 2 × 4, so
+it was recorded whole — 8 requests, no authentication, `scripts/extract-bean-creation.mjs` on
+2026-09-02 — and frozen into `src/lib/bean-creation.json`. `composeGrainNeuf` **reads** it.
+
+⚠️ **Do not factor that table into a formula.** `grinder = robusta ? 3 : 4` is exact today and
+reinvents seven of the eight points the day one cell changes. `verif-bean-adapt.mjs` holds a
+*second* transcription of the recording, typed in from the raw log: comparing the function's output
+to the very JSON it reads would only prove an array access, whereas the copy fails the script if the
+generated file is hand-edited.
+
+⚠️ **The creation rule was OURS for one day, it was labelled as such, it was green — and it was
+wrong on both axes.** Before the sweep, `composeGrainNeuf` computed `2 + roast` for the grind and
+keyed temperature/aroma off the blend; eight coherence tests asserted that intention (grind strictly
+increasing with roast, robusta coarser and cooler) and all passed. The recording says the opposite:
+**the grind depends only on the blend** (robusta is *finer*, 3 vs 4), **temperature and aroma depend
+only on the roast**, and the four roast levels **collapse into two buckets**. That is the exact limit
+of verification without an oracle — it proves code does what it says, never that what it says is
+true — and the reason 8 requests were worth more than eight tests.
+
+What the screen shows follows `source` in the response (`"delonghi"` + the sweep date), never a
+hard-coded sentence. Both branches are still in the dialog: getting a number's origin wrong, in
+either direction, is invisible. The questionnaire itself never touches the network.
+
+⚠️ **`getBeanSystem.sr` is NOT dead code, whatever `docs/bean-adapt.md` §3.2 used to say.** Its two
+callers live in methods JADX gives up on (`Method not decompiled`, 958 and 369 instruction units in
+`L6.j$b$a` / `L6.j$d$a`), so a `grep` over `decompiled/sources/` finds nothing and concludes wrongly.
+Read at the bytecode level (`dexdump -d` on `classes2.dex`): `L6.j.C(1, …)` dispatches on its `int`
+argument — `1` builds a `BeanChoice` from questions 1 and 2, `2` builds a `BeanAdvanceChoice` from
+questions 11 and 12. Both run on every bean creation.
+
+Two more findings from that same read, for whoever ports more of this flow:
+
+- the creation call sends **question 11 hard-coded to answer `2`** (dark crema, Δtemperature = 0) —
+  the creation flow never asks about crema;
+- of the three values the basic call returns, the app keeps temperature and aroma but **discards the
+  grinder**, substituting the grind the user picked by hand; it then writes parameter **61** (coffee
+  temperature) to the machine and pins the `TASTE` parameter of beverage **200 (« Espresso BS 1 »)**
+  with `setDefValue = setMinValue = setMaxValue = aroma`.
+
 ### Several machines
 
 Machine ids are **ours** (`m1`, `m2`…), not the DSN — the DSN is only discovered after an address is
@@ -237,9 +288,14 @@ catalog is one model's, shared by all — a mismatch is reported, not corrected.
 `d270_serialnumber` characters 1–5 index the manufacturer table (`0132217055` → `17055` →
 ECAM 610.75.MB) — no cloud involved. `machine-models.json`, `machine-catalogs.json` and
 `beverage-images.json` are **generated** by `scripts/extract-*.mjs` from the APK (ESLint ignores the
-first two). Never hand-edit them; change the script. `bean-images.json` is generated too, but from a
-**network** source — De'Longhi's questionnaire S3 (`scripts/import-bean-images.mjs`), which is what
-names the four roast-level visuals and the three crema ones.
+first two). Never hand-edit them; change the script. **Two more are generated from a *network*
+source**, and each has an offline replay flag so the decoding can be re-checked without calling out
+again: `bean-images.json` from De'Longhi's questionnaire S3 (`scripts/import-bean-images.mjs
+--json`), which names the four roast-level visuals and the three crema ones, and
+`bean-creation.json` from `getBeanSystem.sr` (`scripts/extract-bean-creation.mjs --brut`), the 8
+cells of the bean-creation rule. That script writes **no table at all** if one cell fails: a table
+with seven cells out of eight would make the eighth setting up, which is the failure this whole repo
+is built to avoid.
 
 ### App multiplexer — off by default
 
@@ -378,6 +434,14 @@ lying around.
 
 Commit `c807a2c` ("CLean doc") deleted `CLAUDE.md`, `ETAT.md`, `PRODUCT.md` and the whole `doc/`
 tree. `README.md` and many source comments still point at `doc/*.md`
-(`analyse-connexion-wifi.md`, `commandes-cafe.md`, `format-trame-boisson.md`, `bean-adapt.md`,
+(`analyse-connexion-wifi.md`, `commandes-cafe.md`, `format-trame-boisson.md`,
 `materiel-et-firmware.md`, `securite.md`, `spec-proxy-multi-app.md`): those links are dead until
 `doc/` comes back. The content is recoverable with `git show c807a2c^:doc/<file>`.
+
+**`doc/bean-adapt.md` is back** — restored from that history and brought up to date when the
+creation rule landed, so its link resolves and the other six do not. Restoring another one is the
+same two moves: `git show c807a2c^:doc/<file>` for the redacted twin, then reconcile it against
+`docs/<file>` on the workspace side, which kept receiving findings while `doc/` was gone. Do not
+regenerate a twin from the private version by hand — the markers (`IP_MACHINE`,
+`AC000W0XXXXXXXX`, `VLAN_IOT`, "Grain A/B") are what makes it publishable, and the historical
+version already has them in the right places.

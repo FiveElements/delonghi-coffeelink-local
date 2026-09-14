@@ -5,7 +5,7 @@ import { mfetch } from "./machine";
 import Icone from "./icons";
 import { ImageCrema } from "./VignetteGrains";
 import { type Ask } from "./confirm";
-import { cn } from "@/ui/cn";
+import ChoixVisuel from "./ChoixVisuel";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
@@ -220,6 +220,11 @@ export default function AffinageDialog({
 
   return (
     <Dialog open={ouvert} onOpenChange={(o) => { if (!o) onFermer(); }}>
+      {/* ⚠️ **Ce dialogue mesure 512 px, pas 544 : `DialogContent` porte `sm:max-w-lg`, et le
+          variant bat un `max-w-*` sans variant.** Mesuré. La classe ci-dessous décrit donc une
+          intention, pas le résultat — c'est laissé tel quel parce que son contenu tient dans 512 et
+          que l'élargir n'aurait aucun bénéfice, mais le prochain qui écrira une largeur ici doit
+          savoir qu'il lui faut aussi le `sm:`. `CreationGrainDialog` le fait, et dit pourquoi. */}
       <DialogContent className="max-w-[34rem]">
         <DialogHeader>
           <DialogTitle>{t("refineHeading", { name: nom })}</DialogTitle>
@@ -282,7 +287,7 @@ export default function AffinageDialog({
                   justement de COMPARER : une liste fermée n'en montre qu'un à la fois.
                   Écrits à la main, pas en boucle — `verif-messages.mjs` ne voit que les clés
                   littérales, et un `t(`crema${n}`)` lui échapperait. */}
-              <ChoixVisuel nom="crema" valeur={crema} onChange={setCrema} options={[
+              <ChoixVisuel nom="crema" etiquette={t("crema")} valeur={crema} onChange={setCrema} options={[
                 { v: 1, libelle: t("crema1"), image: <ImageCrema niveau={1} className="h-12 w-auto" /> },
                 { v: 2, libelle: t("crema2"), image: <ImageCrema niveau={2} className="h-12 w-auto" /> },
                 { v: 3, libelle: t("crema3"), image: <ImageCrema niveau={3} className="h-12 w-auto" /> },
@@ -294,7 +299,7 @@ export default function AffinageDialog({
           {etape === 2 && (
             <>
               <h3 tabIndex={-1} ref={titreEtape}>{t("taste")}</h3>
-              <ChoixVisuel nom="taste" valeur={taste} onChange={setTaste} options={[
+              <ChoixVisuel nom="taste" etiquette={t("taste")} valeur={taste} onChange={setTaste} options={[
                 { v: 1, libelle: t("taste1") },
                 { v: 2, libelle: t("taste2") },
                 { v: 3, libelle: t("taste3") },
@@ -375,67 +380,5 @@ export default function AffinageDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * Un choix parmi trois, montré en entier.
- *
- * ⚠️ **C'est un `radiogroup` écrit à la main, et il doit l'être en entier.** Des `<button>` posés
- * côte à côte n'annoncent ni le groupe, ni le nombre d'options, ni celle qui est choisie — ils se
- * lisent « bouton, bouton, bouton ». Le rôle, `aria-checked` et le nom du groupe sont donc portés
- * explicitement, et la navigation aux flèches est écrite : dans un groupe de boutons radio, seul
- * l'élément coché est dans l'ordre de tabulation (`tabIndex` roving), et les flèches déplacent le
- * choix. C'est ce que `<input type="radio">` donnait gratuitement, et ce qu'il faut redemander
- * dès qu'on veut une image dans l'étiquette.
- */
-function ChoixVisuel({
-  nom, valeur, onChange, options,
-}: {
-  nom: string;
-  valeur: number;
-  onChange: (v: number) => void;
-  options: { v: number; libelle: string; image?: React.ReactNode }[];
-}) {
-  const t = useTranslations("beanAdapt");
-  const clavier = (e: React.KeyboardEvent) => {
-    const i = options.findIndex((o) => o.v === valeur);
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); onChange(options[(i + 1) % options.length].v); }
-    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); onChange(options[(i - 1 + options.length) % options.length].v); }
-  };
-  return (
-    <div className="row" role="radiogroup" aria-label={t(nom === "crema" ? "crema" : "taste")} onKeyDown={clavier}>
-      {options.map((o) => (
-        <button
-          key={o.v}
-          type="button"
-          role="radio"
-          aria-checked={valeur === o.v}
-          tabIndex={valeur === o.v ? 0 : -1}
-          data-choix={`${nom}-${o.v}`}
-          /* ⚠️ **La matière est portée ici, en utilitaires, et ce n'est pas un raccourci.** Une
-             classe dans `surfaces.css` perdrait deux fois en silence : `button:not([data-slot])`
-             y est (0,1,1) et battrait `.choixVisuel` (0,1,0) sur le rembourrage, et la règle
-             `button { font: inherit; line-height: 1.2 }` de la couche `facade` bat n'importe
-             quelle spécificité de `surfaces` sur la taille du texte. `utilities` gagne sur les
-             deux — c'est la loi énoncée dans CLAUDE.md, et elle a déjà coûté trois blocs. */
-          className={cn(
-            "flex flex-1 flex-col items-center gap-2 rounded-[var(--radius)] border p-3 text-center text-sm leading-tight",
-            "cursor-pointer transition-colors",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-            /* **Ambre, et pas vert.** La loi des trois couleurs de ce produit : l'ambre dit
-               « choisi », le vert dit « ça démarre sur l'appareil ». Cocher une réponse à un
-               questionnaire ne démarre rien — c'est la même teinte que la variante `choisi`. */
-            valeur === o.v
-              ? "border-ambre bg-ambre-verre text-ambre"
-              : "border-border bg-card text-encre-douce hover:border-encre/40",
-          )}
-          onClick={() => onChange(o.v)}
-        >
-          {o.image}
-          <span>{o.libelle}</span>
-        </button>
-      ))}
-    </div>
   );
 }

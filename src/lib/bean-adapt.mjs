@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /**
  * Bean Adapt — réimplémentation **locale** de la règle d'ajustement.
  *
@@ -92,6 +94,126 @@ export function computeBeanAdapt(current, answers) {
     changed: grinder !== Number(current.grinder) || temperature !== Number(current.temperature) || aroma !== Number(current.aroma),
     notes,
   };
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ * COMPOSER UN GRAIN NEUF — mélange × torréfaction, RELEVÉ et non calculé
+ * ═══════════════════════════════════════════════════════════════════════════════════════════
+ *
+ * L'affinage ci-dessus corrige un grain déjà réglé. Il manquait l'autre moitié : le premier
+ * réglage, quand il n'y a encore rien à corriger. Dans l'app officielle c'est le flux « basique »
+ * du parcours d'ajout — deux questions posées avant toute tasse :
+ *
+ *   question 1  `prequestion_1`  le mélange       → 1 = 100 % arabica, 2 = arabica + robusta
+ *   question 2  `prequestion_2`  la torréfaction  → 1 (claire) … 4 (très foncée)
+ *
+ * puis `POST getBeanSystem.sr` avec ces deux réponses, qui renvoie `{grinder, temperature, aroma}`.
+ * Les appelants sont `NewCreationBeanAdaptFragment$c.l` (`L6.j.C(1, …)`) et `L6.j.P()`.
+ *
+ * ## Une table, pas une formule — et surtout pas la nôtre
+ *
+ * Cette fonction a d'abord été une règle de cette maison, annoncée comme telle à l'écran, parce
+ * qu'aucune des 8 cases n'avait été relevée. Elles l'ont été le **2026-09-02**
+ * (`scripts/extract-bean-creation.mjs`, 8 requêtes, sans authentification) et la vraie règle est
+ * l'inverse de celle qu'on avait devinée, **sur les deux axes** :
+ *
+ *                    | clair | moyen | foncé | très foncé     (mouture / température / arôme)
+ *   100 % arabica    | 4/2/4 | 4/2/4 | 4/1/3 | 4/1/3
+ *   arabica+robusta  | 3/2/4 | 3/2/4 | 3/1/3 | 3/1/3
+ *
+ *   - la **mouture ne dépend que du mélange** (et non de la torréfaction), et le robusta se moud
+ *     **plus FIN** (3) que l'arabica (4) — on avait posé l'inverse, en élargissant avec le foncé ;
+ *   - **température et arôme ne dépendent que de la torréfaction** (et non du mélange), et les
+ *     quatre niveaux s'effondrent en **deux paliers** : {claire, moyenne} → 2/4, {foncée, très
+ *     foncée} → 1/3. Le questionnaire offre donc quatre réponses pour deux résultats.
+ *
+ * ⚠️ **La table est LUE, pas interpolée ni factorisée.** Écrire `grinder = robusta ? 3 : 4` serait
+ * exact aujourd'hui et faux le jour où De'Longhi changerait une case : une formule tirée de huit
+ * points en réinventerait sept. Le relevé est figé dans `bean-creation.json`, la lecture est un
+ * accès direct, et l'absence d'une case lève — exactement comme le script refuse d'écrire une
+ * table trouée. Les motifs ci-dessus sont de la documentation, pas du code.
+ *
+ * ⚠️ **Aucun appel réseau ici.** Le questionnaire d'ajout de grain lit la table en mémoire ; le
+ * seul geste sortant de tout ce sujet est le script de relevé, lancé à la main. C'est la même
+ * discipline que `bean-images.json` : généré depuis le réseau, servi depuis le dépôt.
+ *
+ * ⚠️ **`source` nomme l'origine, et l'écran s'y adapte.** Il valait `"local"` tant que la règle
+ * était de nous, ce qui déclenchait un avertissement dans le dialogue ; il vaut maintenant
+ * `"delonghi"` avec la date du relevé, et cet avertissement disparaît **de lui-même** — c'est
+ * pourquoi le dialogue teste la valeur au lieu d'écrire le libellé en dur.
+ */
+
+/** Les deux réponses de `prequestion_1`, avec les identifiants du questionnaire De'Longhi. */
+export const MELANGE_ARABICA = 1;
+export const MELANGE_ARABICA_ROBUSTA = 2;
+/** Les quatre niveaux de `prequestion_2`, du plus clair au plus foncé. */
+export const TORREFACTION_MIN = 1;
+export const TORREFACTION_MAX = 4;
+
+/**
+ * Le relevé, tel qu'écrit par `scripts/extract-bean-creation.mjs`. `JSON.parse(readFileSync(…))`
+ * et non une `import` d'attribut : c'est la forme déjà employée par `beverages.mjs` et
+ * `machine-models.mjs` pour leurs tables générées, et elle ne dépend d'aucun réglage de bundler.
+ */
+const CREATION = JSON.parse(readFileSync(new URL("./bean-creation.json", import.meta.url), "utf8"));
+
+/** La date du relevé, portée jusqu'à l'écran : un réglage venu d'ailleurs se date. */
+export const CREATION_RELEVE = CREATION.releve;
+
+/**
+ * @param {{melange:1|2, torrefaction:1|2|3|4}} reponses les deux réponses du questionnaire
+ * @returns {{grinder:number, temperature:number, aroma:number, source:"delonghi", releve:string, notes:string[]}}
+ */
+export function composeGrainNeuf(reponses) {
+  const melange = reponses?.melange;
+  const torrefaction = reponses?.torrefaction;
+
+  /**
+   * ⚠️ **On refuse au lieu de retomber sur une valeur par défaut.** Une réponse hors des options
+   * ne vient pas d'un utilisateur — elle vient d'un appel mal formé. Retomber en silence sur
+   * « arabica » ferait afficher un réglage complet pour une question que personne n'a posée, et
+   * c'est précisément le genre d'erreur que ce dépôt tient pour la pire : plausible et fausse.
+   */
+  if (melange !== MELANGE_ARABICA && melange !== MELANGE_ARABICA_ROBUSTA) {
+    throw new Error(`mélange ${JSON.stringify(melange)} inconnu : attendu ${MELANGE_ARABICA} (100 % arabica) ou ${MELANGE_ARABICA_ROBUSTA} (arabica + robusta)`);
+  }
+  if (!Number.isInteger(torrefaction) || torrefaction < TORREFACTION_MIN || torrefaction > TORREFACTION_MAX) {
+    throw new Error(`torréfaction ${JSON.stringify(torrefaction)} invalide : attendu un entier de ${TORREFACTION_MIN} (claire) à ${TORREFACTION_MAX} (très foncée)`);
+  }
+
+  const cle = `${melange}-${torrefaction}`;
+  const releve = CREATION.table?.[cle];
+  /* Une case manquante est un fichier abîmé, pas une entrée invalide : on le dit autrement. */
+  if (!releve) throw new Error(`bean-creation.json : case ${cle} absente du relevé (relancer scripts/extract-bean-creation.mjs)`);
+
+  const grinder = clamp(releve.grinder, GRINDER_MIN, GRINDER_MAX);
+  const temperature = clamp(releve.temperature, TEMPERATURE_MIN, TEMPERATURE_MAX);
+  const aroma = clamp(releve.aroma, AROMA_MIN, AROMA_MAX);
+
+  /**
+   * Une note par réglage, toujours — et **préfixées `neuf`**.
+   *
+   * L'affinage n'en émet que sur l'événement notable, parce qu'il compare à un état connu. Ici il
+   * n'y a rien à comparer : la note dit **de quelle réponse vient le chiffre**, ce qui est la seule
+   * chose que trois curseurs posés d'autorité ne racontent pas. Le préfixe, lui, sépare cet espace
+   * de clés de celui de l'affinage : les deux dialogues rendent leurs notes par `t("note_" + n)`, et
+   * une note « grinderFiner » servie ici parlerait d'un écoulement que personne n'a mesuré.
+   *
+   * ⚠️ **Les notes suivent la causalité relevée, pas celle qu'on avait supposée.** La première
+   * version expliquait la mouture par la torréfaction et la température par le mélange : deux
+   * phrases justes en caféologie et fausses sur cette machine. C'est le genre d'erreur qu'un
+   * relevé corrige et qu'une explication plausible fait vivre longtemps.
+   */
+  const robusta = melange === MELANGE_ARABICA_ROBUSTA;
+  const fonce = torrefaction >= 3;
+  const notes = [
+    robusta ? "neufMoutureRobusta" : "neufMoutureArabica",
+    fonce ? "neufTempFoncee" : "neufTempClaire",
+    fonce ? "neufAromeFoncee" : "neufAromeClaire",
+  ];
+
+  return { grinder, temperature, aroma, source: "delonghi", releve: CREATION.releve, notes };
 }
 
 /**

@@ -732,6 +732,13 @@ try {
 
   /** Ouvre le formulaire d'une configuration neuve sur /beans. Rend la poignée du groupe. */
   const RAIL = '[role=radiogroup][aria-labelledby$="-torrefaction-legende"]';
+  /**
+   * ⚠️ **Le rail ne s'ouvre plus d'un seul clic : il vit à l'ÉTAPE 3 du questionnaire.** « Nouveau »
+   * dépliait le formulaire en place ; il ouvre maintenant `CreationGrainDialog`, et le formulaire
+   * n'apparaît qu'une fois le mélange et la torréfaction répondus. Les deux avancées sont écrites
+   * ici en clair plutôt que par le helper `avancer` du parcours d'affinage : celui-ci est déclaré
+   * plus bas dans ce fichier, et l'appeler depuis ce bloc-ci le lirait avant son initialisation.
+   */
   const ouvrirRailTorrefaction = async (page) => {
     await page.goto(BASE + "/beans", { waitUntil: "networkidle2", timeout: 30000 });
     const boutons = await page.$$("button");
@@ -741,6 +748,12 @@ try {
       if (txt.includes("Nouveau")) { await b.click(); ouvert = true; break; }
     }
     vrai(ouvert, "le bouton « Nouveau » de la carte de création est introuvable");
+    await page.waitForSelector('[role="dialog"] [data-nav="suivant"]', { timeout: 5000 });
+    /* Le mélange, puis la torréfaction. La seconde avancée déclenche le calcul serveur, d'où
+       l'attente du tableau : sans elle, le formulaire n'est pas encore monté. */
+    await page.click('[role="dialog"] [data-nav="suivant"]');
+    await page.click('[role="dialog"] [data-nav="suivant"]');
+    await page.waitForFunction(() => document.querySelector('[role="dialog"] table'), { timeout: 8000 });
     /* ⚠️ **Pas `[role=radiogroup]` tout court.** La bascule de finition en est un aussi, et elle
        est plus haut dans le DOM : le sélecteur large a d'abord mesuré « Thème de l'interface »,
        donc un test vert-puis-rouge qui ne parlait pas du rail. On cible par le contrat du composant
@@ -1016,6 +1029,283 @@ try {
     vrai(garde.estLeDessus, "le focus n'est pas dans la garde mais dans le dialogue du dessous");
     // On ANNULE : ce script ne doit jamais mettre une commande de préparation en file.
     await page.keyboard.press("Escape");
+    await page.close();
+  });
+
+  /**
+   * ── AJOUTER UN GRAIN — LES DEUX QUESTIONS, PUIS LA CONFIGURATION ───────────────────────────
+   *
+   * La carte « + Nouvelle configuration » dépliait le formulaire EN PLACE, sur trois curseurs posés
+   * au milieu de leur plage. Elle ouvre maintenant `CreationGrainDialog` : mélange, torréfaction,
+   * puis la configuration que la règle propose. Le déménagement met en jeu les mêmes garanties que
+   * celui de l'affinage — piège de focus, Échap, inertie du fond — plus trois choses propres à ce
+   * parcours-ci :
+   *
+   *   · la carte ne doit plus rien éditer, sinon la page porterait DEUX formulaires de création ;
+   *   · les deux réponses doivent changer les chiffres à l'écran, sinon le questionnaire est un
+   *     décor et personne ne s'en apercevrait — les valeurs resteraient plausibles ;
+   *   · l'origine de la règle doit être écrite, parce qu'elle est de cette maison et non de
+   *     De'Longhi. C'est la seule affirmation de cet écran qui ne se rattrape pas plus tard.
+   *
+   * Le groupe de réponses est le MÊME composant que celui de l'affinage (`ChoixVisuel`), servi ici
+   * avec deux options au lieu de trois : la tabulation « roving » se vérifie donc une fois de plus,
+   * sur le cas limite où il n'y a que deux crans.
+   */
+  console.log("\nAjouter un grain — la carte ouvre le questionnaire, en trois étapes");
+
+  /**
+   * La carte de création, repérée par son TITRE — jamais par sa position dans la grille : un
+   * `.cards.grains > :last-child` aurait désigné la dernière fiche mémorisée le jour où l'ordre de
+   * la grille change.
+   *
+   * ⚠⚠ **Le corps du chercheur est écrit DANS chaque `page.evaluate`, et pas sérialisé depuis
+   * ici par `toString()`.** Une chaîne qui *ressemble* à une fonction n'est pas évaluée comme une
+   * expression par Puppeteer : elle est prise pour la fonction à appeler, et tout ce qui suit la
+   * parenthèse — `.outerHTML`, `.click()` — tombe dans le vide. Le coût exact de cette erreur,
+   * payeé une fois : le clic n'ouvrait aucun dialogue, et le test du HTML de la carte passait
+   * quand même, parce qu'il testait ses expressions régulières contre `undefined`. Un test qui
+   * réussit lorsque sa recherche échoue est pire que pas de test — d'où le `vrai(carte !== null)`
+   * ci-dessous, qui rend le passage à vide impossible.
+   */
+  const TITRE_CARTE_NEUVE = "Nouvelle configuration";
+
+  const htmlCarteNeuve = (page) => page.evaluate((titre) => {
+    const carte = [...document.querySelectorAll(".cards.grains > *")]
+      .find((c) => c.querySelector("h3")?.textContent?.trim() === titre);
+    return carte ? carte.outerHTML : null;
+  }, TITRE_CARTE_NEUVE);
+
+  /** Ouvre le dialogue par le bouton « Nouveau » de la carte de création. */
+  const ouvrirCreation = async (page) => {
+    await page.goto(BASE + "/beans", { waitUntil: "networkidle2", timeout: 30000 });
+    await page.waitForSelector(DOS_BANC, { timeout: 5000 });
+    await page.evaluate((titre) => {
+      const carte = [...document.querySelectorAll(".cards.grains > *")]
+        .find((c) => c.querySelector("h3")?.textContent?.trim() === titre);
+      if (!carte) throw new Error("carte « " + titre + " » introuvable");
+      const cmd = carte.querySelector("button");
+      if (!cmd) throw new Error("la carte « " + titre + " » ne porte aucune commande");
+      if (cmd.disabled) throw new Error("la commande de la carte « " + titre + " » est désactivée");
+      cmd.click();
+    }, TITRE_CARTE_NEUVE);
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+  };
+
+  await test("la carte n'édite plus rien : elle ouvre le questionnaire", async () => {
+    /* Le défaut que ceci attrape est le pire de la migration : garder l'ancien formulaire déplié EN
+       PLUS du dialogue. Rien ne casserait — les deux marcheraient — et la prochaine amélioration
+       atterrirait sur un seul des deux. C'est l'histoire de « Réglage manuel » sur cette page. */
+    const page = await navigateur.newPage();
+    await page.goto(BASE + "/beans", { waitUntil: "networkidle2", timeout: 30000 });
+    await page.waitForSelector(DOS_BANC, { timeout: 5000 });
+    const carte = await htmlCarteNeuve(page);
+    vrai(carte !== null, "carte « " + TITRE_CARTE_NEUVE + " » introuvable dans la grille");
+    vrai(!/role="slider"/.test(carte), "la carte de création porte encore des curseurs : le formulaire est resté en place");
+    vrai(!/<input/.test(carte), "la carte de création porte encore un champ de saisie");
+    vrai(await page.evaluate(() => !document.querySelector('[role="dialog"]')),
+      "un dialogue est ouvert avant le moindre clic");
+    await page.close();
+  });
+
+  await test("les trois étapes s'enchaînent, et la dernière porte la proposition", async () => {
+    const page = await navigateur.newPage();
+    await ouvrirCreation(page);
+    // Le compte d'étapes est écrit, pas seulement dessiné : la barre de progression est aria-hidden.
+    vrai(await page.evaluate(() => document.querySelector('[role="dialog"]').textContent.includes("Étape 1 sur 3")),
+      "l'étape courante n'est pas annoncée en toutes lettres");
+    eq(await etapeCourante(page), "Mélange", "étape 1");
+    await avancer(page);
+    eq(await etapeCourante(page), "Torréfaction", "étape 2");
+    /* Le passage de la dernière question à la configuration DÉCLENCHE le calcul serveur : sans
+       attente, on mesurerait l'étape 2 encore affichée. */
+    await avancer(page);
+    await page.waitForFunction(() => document.querySelector('[role="dialog"] table'), { timeout: 8000 });
+    eq(await etapeCourante(page), "La configuration De'Longhi", "étape 3");
+    const lignes = await page.$$eval('[role="dialog"] tbody tr td:first-child', (c) => c.map((x) => x.textContent.trim()));
+    eq(lignes.join("|"), "Mouture|Température|Arôme", "lignes du tableau de proposition");
+    await page.close();
+  });
+
+  await test("le mélange est un vrai groupe de boutons radio, à DEUX options", async () => {
+    // Deux options est le cas limite du `ChoixVisuel` partagé : une flèche doit faire le tour, et
+    // une seule des deux doit rester dans l'ordre de tabulation.
+    const page = await navigateur.newPage();
+    await ouvrirCreation(page);
+    const groupe = await page.evaluate(() => {
+      const g = document.querySelector('[role="dialog"] [role="radiogroup"]');
+      return {
+        nomme: !!(g.getAttribute("aria-label") || g.getAttribute("aria-labelledby")),
+        options: [...g.querySelectorAll('[role="radio"]')].map((r) => ({
+          coche: r.getAttribute("aria-checked"), tab: r.tabIndex, choix: r.dataset.choix,
+        })),
+      };
+    });
+    vrai(groupe.nomme, "le groupe de mélanges n'a pas de nom accessible");
+    eq(groupe.options.length, 2, "nombre de mélanges proposés");
+    eq(groupe.options.filter((o) => o.coche === "true").length, 1, "mélanges cochés");
+    eq(groupe.options.filter((o) => o.tab === 0).length, 1, "options atteignables à la tabulation");
+    const coche = () => page.evaluate(() =>
+      document.querySelector('[role="dialog"] [role="radio"][aria-checked="true"]').dataset.choix);
+    await page.focus('[role="dialog"] [role="radio"][aria-checked="true"]');
+    await page.keyboard.press("ArrowRight");
+    eq(await coche(), "blend-2", "mélange coché après une flèche droite");
+    // Et le tour : depuis la seconde option, la flèche droite revient à la première.
+    await page.keyboard.press("ArrowRight");
+    eq(await coche(), "blend-1", "mélange coché après le tour complet");
+    await page.close();
+  });
+
+  /** Mène le parcours jusqu'au tableau, sur un mélange et une torréfaction donnés. */
+  const jusquAuTableau = async (page, blend, roast) => {
+    await ouvrirCreation(page);
+    await page.click('[role="dialog"] [data-choix="blend-' + blend + '"]');
+    await avancer(page);
+    await page.waitForFunction(() => document.querySelector('[role="dialog"] [data-choix^="roast-"]'), { timeout: 5000 });
+    await page.click('[role="dialog"] [data-choix="roast-' + roast + '"]');
+    await avancer(page);
+    await page.waitForFunction(() => document.querySelector('[role="dialog"] table'), { timeout: 8000 });
+  };
+  const colonne = (page, n) =>
+    page.$$eval('[role="dialog"] tbody tr td:nth-child(' + n + ')', (c) => c.map((x) => x.textContent.trim()).join("/"));
+
+  await test("les deux réponses changent les chiffres proposés", async () => {
+    /* L'affirmation centrale de l'écran. Une règle qui ignorerait une question rendrait des valeurs
+       parfaitement plausibles, et c'est pour ça que rien d'autre ne l'attraperait : ni `tsc`, ni
+       ESLint, ni l'œil. Vérifié de bout en bout — la réponse cliquée, la requête, le tableau — et
+       non sur la fonction pure, que `verif-bean-adapt.mjs` couvre déjà.
+
+       Deux grains opposés : arabica clair contre robusta très foncé. Si les trois chiffres
+       coïncidaient, le questionnaire serait un décor. */
+    const propose = async (blend, roast) => {
+      const page = await navigateur.newPage();
+      await jusquAuTableau(page, blend, roast);
+      const out = await colonne(page, 2);
+      await page.close();
+      return out;
+    };
+    const arabicaClair = await propose(1, 1);
+    const robustaFonce = await propose(2, 4);
+    vrai(arabicaClair !== robustaFonce, `arabica clair et robusta très foncé proposent le même réglage (${arabicaClair})`);
+    /* Et pas seulement « différent » : le SENS, sur l'axe que le relevé attribue à chaque question.
+       Un signe inversé passerait le test d'égalité ci-dessus sans un mot — et c'est exactement ce
+       qui s'est produit tant que la règle était devinée : la mouture s'élargissait avec la
+       torréfaction, ce que le service ne fait pas. Elle dépend du MÉLANGE, et le robusta est plus
+       fin ; la température dépend de la TORRÉFACTION, et le foncé est plus froid. */
+    const [mA, tClair] = arabicaClair.split("/").map(Number);
+    const [mR, tR] = robustaFonce.split("/").map(Number);
+    vrai(mR < mA, `la mouture du robusta (${mR}) n'est pas plus fine que celle de l'arabica (${mA})`);
+    vrai(tR < tClair, `la température du foncé (${tR}) n'est pas plus basse que celle du clair (${tClair})`);
+    /* Chaque question sur son axe, bout en bout : à mélange égal la mouture ne bouge pas, à
+       torréfaction égale la température ne bouge pas. C'est ce que dit le relevé, et c'est ce qui
+       serait faux si un jour l'écran renvoyait les réponses dans le mauvais ordre. */
+    const arabicaFonce = await propose(1, 4);
+    eq(arabicaFonce.split("/")[0], arabicaClair.split("/")[0], "la torréfaction bouge la mouture");
+    eq(arabicaFonce.split("/")[1], robustaFonce.split("/")[1], "le mélange bouge la température");
+  });
+
+  await test("la proposition dit D'OÙ elle vient et de QUAND, et le formulaire est celui des autres cartes", async () => {
+    const page = await navigateur.newPage();
+    await jusquAuTableau(page, 1, 2);
+    const texte = await page.evaluate(() => document.querySelector('[role="dialog"]').textContent);
+    /* L'origine vient du champ `source` de la réponse, pas d'une phrase codée dans l'écran. Cette
+       ligne a d'abord exigé l'inverse — « proposition de ce serveur », « pas le calcul de
+       De'Longhi » — parce que la règle était alors de cette maison ; elle a changé le jour du
+       relevé, et c'est le seul endroit qu'il a fallu changer côté écran. Se tromper d'origine sur
+       un chiffre, dans un sens comme dans l'autre, ne se voit pas. */
+    vrai(/service De'Longhi/.test(texte), "l'écran ne dit pas de qui viennent les trois valeurs");
+    vrai(/relevées le \d{4}-\d{2}-\d{2}/.test(texte), "l'écran ne date pas le relevé");
+    vrai(/rien ne sort du réseau local/.test(texte), "l'écran ne dit pas que l'affichage est hors ligne");
+    vrai(!/proposition de ce serveur/.test(texte), "l'écran s'excuse encore d'une règle qui n'est plus la nôtre");
+    /* `#creation-nom` : le préfixe du formulaire partagé. S'il manque, c'est une copie du formulaire
+       qui a été écrite dans le dialogue au lieu d'y monter `ReglagesGrains`. */
+    await page.waitForSelector("#creation-nom", { timeout: 5000 });
+    vrai(await page.evaluate(() => document.querySelectorAll('[role="dialog"] [role="slider"]').length >= 3),
+      "les trois curseurs du formulaire partagé manquent dans le dialogue");
+    /* La torréfaction répondue à l'étape 2 est déjà cochée dans le formulaire : la redemander
+       ferait poser deux fois la même question dans le même parcours. Lu sur le LIBELLÉ du cran
+       coché et non sur un attribut `value` — c'est ce que voit l'utilisateur, et Radix ne garantit
+       pas de reporter `value` dans le DOM. */
+    eq(await page.evaluate((sel) => {
+      const g = document.querySelector(sel);
+      const coche = [...g.querySelectorAll("[role=radio]")].find((r) => r.getAttribute("aria-checked") === "true");
+      return (coche?.textContent ?? "").trim();
+    }, RAIL), "Moyenne", "torréfaction reprise dans le formulaire");
+    await page.close();
+  });
+
+  await test("« Reprendre la proposition » n'apparaît qu'après un écart, et il la restaure", async () => {
+    const page = await navigateur.newPage();
+    await jusquAuTableau(page, 1, 2);
+    const reprise = () => page.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"] button')].some((b) => b.textContent.includes("Reprendre la proposition")));
+    vrai(!(await reprise()), "« Reprendre la proposition » s'affiche alors que rien n'a bougé");
+    eq(await colonne(page, 3), await colonne(page, 2), "les valeurs retenues à l'ouverture");
+    /* On écarte au CLAVIER, sur le curseur : c'est le chemin qui a déjà trahi cette page une fois —
+       le curseur et le champ doivent écrire dans le même brouillon. */
+    await page.focus('[role="dialog"] [role="slider"]');
+    await page.keyboard.press("ArrowRight");
+    vrai(await reprise(), "après un écart, « Reprendre la proposition » n'apparaît pas");
+    vrai((await colonne(page, 3)) !== (await colonne(page, 2)), "la colonne « Retenu » ne suit pas le curseur");
+    await page.evaluate(() =>
+      [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.includes("Reprendre la proposition")).click());
+    eq(await colonne(page, 3), await colonne(page, 2), "les valeurs retenues après reprise");
+    vrai(!(await reprise()), "« Reprendre la proposition » reste affiché après la reprise");
+    await page.close();
+  });
+
+  await test("l'étape de configuration tient dans la fenêtre, sans déborder ni gonfler une image", async () => {
+    /**
+     * **Trois mesures, et chacune vient d'un défaut réel de cet écran.**
+     *
+     * 1. `ReglagesGrains` monte une affiche de grain, parce que deux de ses hôtes sont le dos d'une
+     *    carte dont la face avant est ce même cadre. Dans un dialogue il n'y a pas de carte : elle
+     *    rendait le dessin de torréfaction à **370 × 332 px agrandis d'un fichier de 147 × 132**,
+     *    ~660 px de haut, au-dessus d'un rail qui montre le même dessin. D'où `photo={false}`, et
+     *    d'où ce plafond : aucune image de ce dialogue n'a de raison de dépasser un pouce.
+     * 2. `DialogContent` porte `sm:max-w-lg` (512 px), qui bat un `max-w-[34rem]` écrit sans
+     *    variant — la boîte sortait à 512 pendant que la classe demandait 544. Une largeur qu'on
+     *    n'obtient pas est le pire des deux mondes : la classe se lit, et la boîte fait autre chose.
+     * 3. C'est une **grille**, et sa colonne unique se dimensionne sur le contenu le plus large :
+     *    la largeur minimale du tableau l'étirait à 568 px dans une boîte de 510, et tout débordait
+     *    à droite. Le tableau doit défiler dans son `.tableWrap`, pas le dialogue.
+     *
+     * Aucune des trois ne se voit de `tsc`, d'ESLint ni d'un rendu de composant isolé.
+     */
+    const page = await navigateur.newPage();
+    await jusquAuTableau(page, 1, 2);
+    const m = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"]');
+      const b = d.getBoundingClientRect();
+      const creer = [...d.querySelectorAll("button")].find((x) => x.dataset.nav === "creer");
+      const c = creer?.getBoundingClientRect();
+      return {
+        h: Math.round(b.height), w: Math.round(b.width), fenetre: innerHeight,
+        deborde: d.scrollWidth - d.clientWidth,
+        images: [...d.querySelectorAll("img")].map((e) => Math.round(e.getBoundingClientRect().height)),
+        creerVisible: !!c && c.bottom <= innerHeight + 1 && c.top >= -1,
+      };
+    });
+    vrai(m.deborde <= 1, `le dialogue déborde de ${m.deborde} px en largeur — la colonne de grille est étirée par son contenu`);
+    vrai(m.h <= m.fenetre, `le dialogue fait ${m.h} px de haut pour une fenêtre de ${m.fenetre} — le corps ne borne pas sa hauteur`);
+    vrai(m.creerVisible, "« Créer » est hors de l'écran : c'est le dialogue entier qui défile, pas son corps");
+    const trop = m.images.filter((h) => h > 64);
+    vrai(trop.length === 0, `image(s) de ${trop.join(", ")} px de haut dans le dialogue — l'affiche du grain est revenue`);
+    await page.close();
+  });
+
+  await test("le dialogue de création piège le focus, Échap le ferme, le fond est retiré de l'arbre", async () => {
+    /* Ces trois garanties viennent de Radix, donc du code. Elles sont revérifiées ici et pas
+       seulement sur l'affinage : c'est le montage du dialogue qui les porte, et un `DialogContent`
+       remplacé par un `<div>` dans un seul des deux écrans ne se verrait pas. */
+    const page = await navigateur.newPage();
+    await ouvrirCreation(page);
+    for (let i = 0; i < 12; i++) await page.keyboard.press("Tab");
+    vrai(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')),
+      "la tabulation sort du dialogue — le focus n'est pas piégé");
+    vrai(await page.evaluate(() => document.querySelectorAll('body > [aria-hidden="true"]').length > 0),
+      "rien n'est retiré de l'arbre d'accessibilité sous le dialogue");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 });
     await page.close();
   });
 

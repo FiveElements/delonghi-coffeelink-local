@@ -65,7 +65,7 @@ En conteneur, l'image est publiée par GitHub Actions — rien à compiler :
 
 ```bash
 docker run -d --name delonghi-lan-server -p 3000:3000 -v lan-server-data:/data \
-  -e SERVER_IP=<adresse de l hote> ghcr.io/jmorille/delonghi-coffeelink-local:edge
+  -e SERVER_IP=<adresse de l hote> ghcr.io/fiveelements/delonghi-coffeelink-local:edge
 ```
 
 Exemple `compose.yaml` complet et toutes les options : **[DOCKER.md](DOCKER.md)**.
@@ -138,7 +138,7 @@ réutilisable du projet, indépendamment de ce code :
 |---|---|
 | [`analyse-connexion-wifi.md`](doc/analyse-connexion-wifi.md) | protocole LAN mode Ayla, échange de clés, cryptographie, cycle de vie d'une commande |
 | [`commandes-cafe.md`](doc/commandes-cafe.md) | trames ECAM : préparation, profils, recettes, sommes de contrôle, statistiques |
-| [`bean-adapt.md`](doc/bean-adapt.md) | Bean Adapt : lecture, écriture, et la règle d'ajustement rétro-conçue |
+| [`bean-adapt.md`](doc/bean-adapt.md) | Bean Adapt : lecture, écriture, les DEUX règles relevées sur le vrai service — l'ajustement (rétro-conçu) et la composition d'un grain neuf (table de 8 cases) |
 | [`materiel-et-firmware.md`](doc/materiel-et-firmware.md) | le module Wi-Fi, son firmware, la fiche appareil Ayla |
 | [`securite.md`](doc/securite.md) | ce que l'analyse révèle, et comment cloisonner la machine |
 

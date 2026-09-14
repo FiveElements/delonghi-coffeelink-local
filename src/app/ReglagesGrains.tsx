@@ -33,6 +33,16 @@ import { Input } from "@/ui/input";
  * étiquette : un titre visuel qui ne nomme rien pour un lecteur d'écran aurait échangé une
  * information contre une mise en page.
  *
+ * ⚠️ **L'affiche est optionnelle (`photo`), et c'est le DIALOGUE de création qui la refuse.** Elle
+ * ouvre le formulaire parce que deux de ses hôtes sont le dos d'une carte dont la face avant est
+ * cette même image, dans ce même cadre : là, elle ne coûte rien, le cadre existait déjà. Dans un
+ * dialogue il n'y a pas de carte, donc pas de rectangle à faire tourner — et l'affiche s'y est
+ * mesurée à **370 × 332 px, agrandis d'un fichier de 147 × 132**, soit ~660 px de haut pour un
+ * dessin de torréfaction déjà montré deux lignes plus bas par le rail. Le dialogue faisait
+ * 1 762 px. Ce n'est pas une préférence de mise en page : c'est aussi le parcours de l'appareil,
+ * dont l'écran de création (`CreationBeanAdaptNameFragment`) ne demande QUE le nom — la photo
+ * s'attache plus tard, depuis l'écran de détail et son cadreur.
+ *
  * ⚠️ **Ce formulaire n'envoie RIEN par lui-même, et ses trois hôtes n'écrivent pas au même endroit.**
  * Les commandes vivent chez l'hôte, sous le formulaire : une fiche mémorisée s'enregistre en local,
  * un emplacement de la machine se sépare en deux gestes — le visuel (torréfaction + photo) reste
@@ -79,6 +89,7 @@ export default function ReglagesGrains({
   apercu = null,
   disabled = false,
   prefixe,
+  photo = true,
 }: {
   valeur: Brouillon;
   onChange: (v: Brouillon) => void;
@@ -89,6 +100,11 @@ export default function ReglagesGrains({
   disabled?: boolean;
   /** Préfixe des identifiants de champ : plusieurs cartes peuvent être ouvertes sur la page. */
   prefixe: string;
+  /**
+   * Monter l'affiche-sélecteur de photo. Vrai par défaut — les deux dos de carte la veulent. Faux
+   * dans le dialogue de création, qui n'a pas de cadre à réutiliser : voir l'en-tête.
+   */
+  photo?: boolean;
 }) {
   const t = useTranslations("beanAdapt");
 
@@ -96,15 +112,18 @@ export default function ReglagesGrains({
     <>
       {/* L'affiche, cliquable. Elle reçoit `nom` et `roast` parce qu'elle montre le visuel RÉEL et
           non la seule photo : sans eux, retirer une photo laisserait un creux vide là où la carte
-          affichera le dessin de la torréfaction. Voir l'en-tête de `PhotoGrains`. */}
-      <PhotoGrains
-        value={valeur.image}
-        apercu={apercu}
-        nom={valeur.name}
-        roast={valeur.roast}
-        disabled={disabled}
-        onChange={(img) => onChange({ ...valeur, image: img })}
-      />
+          affichera le dessin de la torréfaction. Voir l'en-tête de `PhotoGrains`.
+          Absente quand l'hôte n'a pas de cadre à lui prêter — voir `photo` dans l'en-tête. */}
+      {photo && (
+        <PhotoGrains
+          value={valeur.image}
+          apercu={apercu}
+          nom={valeur.name}
+          roast={valeur.roast}
+          disabled={disabled}
+          onChange={(img) => onChange({ ...valeur, image: img })}
+        />
+      )}
 
       {/* La limite de 20 caractères est celle de la machine, et `maxLength` la FAIT déjà : la phrase
           qui la répétait sous le champ ne servait qu'à l'annoncer. Elle passe en infobulle, où elle

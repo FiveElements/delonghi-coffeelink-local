@@ -171,6 +171,23 @@ jobs:
       - name: Vérifier le décodage du grain sélectionné
         run: node scripts/verif-beansync.mjs
 
+      # Les deux règles Bean Adapt, chacune rejouée contre un relevé : l'affinage contre la matrice
+      # de neuf cases de `getBeanSystemAdv.sr`, la création contre les huit cases de
+      # `getBeanSystem.sr`. Aucune des deux n'avait de vérification avant, et la seconde a vécu un
+      # jour comme règle de la maison — verte, étiquetée comme telle, et fausse sur les deux axes.
+      - name: Vérifier les règles Bean Adapt
+        run: node scripts/verif-bean-adapt.mjs
+
+      # Le relevé lui-même, rejoué HORS RÉSEAU sur les réponses brutes conservées à côté de la
+      # table (`--brut`). Deux choses en découlent : le décodage — `json_settings` est une chaîne
+      # contenant du JSON, dont les trois valeurs sont elles-mêmes des chaînes — est prouvé sur les
+      # octets d'origine ; et la table commitée est prouvée ISSUE de ces octets, pas retouchée à la
+      # main. Le `git diff` est le test : le script réécrit le fichier, il doit tomber identique.
+      - name: Rejouer le relevé des 8 cases, hors réseau
+        run: |
+          node scripts/extract-bean-creation.mjs --brut src/lib/bean-creation.brut.json
+          git diff --exit-code src/lib/bean-creation.json
+
       # La photo d'un grain rapatriée du datum Ayla `BS<index>IMG` : le type est reniflé DANS les
       # octets, jamais pris de ce que le nuage annonce, et l'index est celui de l'octet 4 de la
       # trame `0xBA`. Se tromper d'index ne lève rien — il range la photo sous un autre grain.
@@ -355,6 +372,14 @@ jobs:
             console.log('stockage', d.storage.engine, d.storage.sqliteVersion, '· journal', d.storage.journalMode);
           "
 
+      # ⚠️ Les deux vérifications ci-dessus passaient alors que l'image ne contenait AUCUN visuel :
+      # `public/` n'entre pas dans `.next`, Next le sert depuis le disque, et l'étape finale ne le
+      # copiait pas. Le serveur se levait, répondait, passait le healthcheck — et rendait 404 sur les
+      # 58 dessins de boisson et les 7 visuels de grain. C'est exactement la panne silencieuse que
+      # ce dépôt se refuse à laisser passer, d'où cette assertion.
+      #
+      # Les URL sont DÉDUITES des tables générées, jamais écrites en dur : un fichier renommé par
+      # `extract-images.mjs` ou `import-bean-images.mjs` déplace aussi la vérification.
       - name: Journal du conteneur
         if: always()
         run: docker logs ci-run || true
