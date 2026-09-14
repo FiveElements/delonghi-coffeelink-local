@@ -16,3 +16,16 @@ out/
 next-env.d.ts
 debug-capture.mjs
 ETAT.md
+
+# `public/boissons/` et `public/grains/` DOIVENT entrer : ce sont les visuels que l'image sert.
+# Leurs dérivations, elles, ne sont pas redistribuables (même décision que .gitignore) — et depuis
+# que le runtime copie `public/` en entier, seul ce filtre les tient hors de l'image.
+public/boissons-*/
+public/boissons-svg/
+public/comparaison-svg.html
+
+# Documentation et outillage : inutiles au build, et `docs/` est la face privée de `doc/`.
+docs/
+doc/
+graft/
+.claude/

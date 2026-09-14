@@ -58,9 +58,21 @@ jobs:
         run: |
           name="delonghi-lan-server-${{ steps.meta.outputs.version }}"
           mkdir -p "dist/$name"
-          cp -r .next src messages package.json pnpm-lock.yaml pnpm-workspace.yaml \
+          cp -r .next src messages public package.json pnpm-lock.yaml pnpm-workspace.yaml \
                 next.config.mjs tsconfig.json server.mjs README.md DOCKER.md \
                 .env.local.example "dist/$name/"
+          # ⚠️ `public/` n'est PAS embarqué dans `.next` : Next le sert depuis le disque à
+          # chaque requête. Oublié ici, l'archive se décompresse, `node server.mjs` démarre,
+          # l'interface s'affiche — et les 58 dessins de boisson et 7 visuels de grain rendent
+          # 404 en silence. Même oubli que l'étape `runtime` du Dockerfile, même coût. On
+          # l'atteste ici plutôt que de le découvrir chez celui qui installe.
+          for attendu in boissons/espresso.webp grains/torrefaction-1.png; do
+            if [ ! -s "dist/$name/public/$attendu" ]; then
+              echo "::error::l'archive ne transporte pas public/$attendu"
+              exit 1
+            fi
+          done
+          echo "visuels embarqués : $(find "dist/$name/public" -type f | wc -l) fichiers"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           ls -lh dist/*.tar.gz
 

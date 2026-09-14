@@ -54,6 +54,11 @@ COPY --from=build /app/.next ./.next
 COPY package.json pnpm-workspace.yaml next.config.mjs server.mjs ./
 COPY src ./src
 COPY messages ./messages
+# ⚠️ `public/` n'est PAS embarqué dans `.next` : Next le sert depuis le disque, à chaque requête.
+# Sans cette ligne l'image se construit, démarre, passe le healthcheck — et rend 404 sur les 58
+# dessins de boisson et les 7 visuels de grain, sans rien dire. C'est la seule source des fichiers
+# que `beverage-images.json` et `bean-images.json` nomment.
+COPY public ./public
 
 # La base SQLite vit dans un volume : l'image, elle, ne contient aucune donnée machine ni secret.
 # uid/gid 1000 = l'utilisateur `node` des images officielles — c'est ce chiffre qu'il faut donner

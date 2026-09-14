@@ -380,6 +380,37 @@ jobs:
       #
       # Les URL sont DÉDUITES des tables générées, jamais écrites en dur : un fichier renommé par
       # `extract-images.mjs` ou `import-bean-images.mjs` déplace aussi la vérification.
+      - name: Les visuels sont bien DANS l'image
+        run: |
+          node -e "
+            const bo = require('./src/lib/beverage-images.json');
+            const gr = require('./src/lib/bean-images.json');
+            for (const u of [
+              bo.chemin + '/' + bo.parId['1'] + '.webp?v=' + bo.version,
+              gr.chemin + '/' + gr.torrefaction['1'] + '.' + gr.extension + '?v=' + gr.version,
+              gr.chemin + '/' + gr.crema['1'] + '.' + gr.extension + '?v=' + gr.version,
+            ]) console.log(u);
+          " > /tmp/visuels.txt
+          cat /tmp/visuels.txt
+          while read -r chemin; do
+            entetes=$(curl -fsS -D - -o /tmp/visuel.bin "http://127.0.0.1:3000${chemin}")
+            octets=$(wc -c < /tmp/visuel.bin)
+            if [ "$octets" -lt 512 ]; then
+              echo "::error::${chemin} ne pese que ${octets} octets"
+              exit 1
+            fi
+            # L'URL porte l'empreinte du jeu PRESENT, et next.config.mjs ne promet un an qu'a
+            # celle-la. Un cache revalidant ici voudrait dire que l'image a ete construite sur une
+            # autre table que celle du depot.
+            case "$entetes" in
+              *immutable*) : ;;
+              *) echo "::error::${chemin} : en-tete de cache inattendu"
+                 printf '%s' "$entetes"
+                 exit 1 ;;
+            esac
+            echo "${chemin} -> ${octets} octets, cache immuable"
+          done < /tmp/visuels.txt
+
       - name: Journal du conteneur
         if: always()
         run: docker logs ci-run || true
