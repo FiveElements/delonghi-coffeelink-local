@@ -91,6 +91,15 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      # ⚠️ `github.repository` porte le nom de l'organisation TEL QU'IL EST ÉCRIT — ici
+      # `FiveElements`. Docker refuse un nom de dépôt qui n'est pas entièrement en minuscules :
+      # « invalid tag … repository name must be lowercase ». L'échec arrive APRÈS le build Next,
+      # au moment de pousser, donc après une vingtaine de minutes d'émulation arm64. Les
+      # expressions GitHub n'ont pas d'opérateur de minuscules : d'où ce passage par $GITHUB_ENV,
+      # qui réécrit `IMAGE` pour toutes les étapes suivantes du job.
+      - name: Le nom de l'image, en minuscules
+        run: echo "IMAGE=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       # arm64 est construit sous émulation QEMU : c'est lent (le build Next domine), mais ça évite
       # d'avoir à maintenir un runner ARM. Le cache GHA rattrape le coût d'une release à l'autre.
       - uses: docker/setup-qemu-action@v4
@@ -135,6 +144,15 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      # ⚠️ `github.repository` porte le nom de l'organisation TEL QU'IL EST ÉCRIT — ici
+      # `FiveElements`. Docker refuse un nom de dépôt qui n'est pas entièrement en minuscules :
+      # « invalid tag … repository name must be lowercase ». L'échec arrive APRÈS le build Next,
+      # au moment de pousser, donc après une vingtaine de minutes d'émulation arm64. Les
+      # expressions GitHub n'ont pas d'opérateur de minuscules : d'où ce passage par $GITHUB_ENV,
+      # qui réécrit `IMAGE` pour toutes les étapes suivantes du job.
+      - name: Le nom de l'image, en minuscules
+        run: echo "IMAGE=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v7
         with:
