@@ -55,7 +55,7 @@ import { dirname, join, resolve } from "node:path";
  */
 const DIR = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : join(process.cwd(), "data");
 const DBFILE = process.env.DATABASE_FILE ? resolve(process.env.DATABASE_FILE) : join(DIR, "lan-server.db");
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /**
  * Identifiant de la première machine. Il est **figé** : c'est celui que la migration attribue à
@@ -164,8 +164,20 @@ CREATE TABLE bean_images (
 ) STRICT;
 `;
 
+const DDL_MCP_TOKENS = `
+CREATE TABLE mcp_tokens (
+  id           INTEGER PRIMARY KEY,
+  name         TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  scopes       TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  last_used_at INTEGER,
+  revoked_at   INTEGER
+) STRICT;
+`;
+
 /** Le schéma courant, en entier — ce que reçoit une base neuve. */
-const DDL = DDL_V2 + DDL_BEAN_IMAGES;
+const DDL = DDL_V2 + DDL_BEAN_IMAGES + DDL_MCP_TOKENS;
 
 // Les deux répertoires : celui des données (migration, anciens JSON) et celui de la base, qui peut
 // être ailleurs si `DATABASE_FILE` la déplace.
@@ -192,6 +204,7 @@ if (fresh) {
   db.exec(`INSERT INTO machines(id, createdAt, data) VALUES('${DEFAULT_MACHINE}', ${Date.now()}, '{"label":null}')`);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   db.exec("COMMIT");
+  bootMessages.push("schéma v3 → v4 : table des jetons d'API MCP ajoutée");
 } else if (from < SCHEMA_VERSION) {
   migrateSchema(from);
 } else if (from > SCHEMA_VERSION) {
@@ -248,6 +261,12 @@ const q = {
   putSetting: db.prepare("INSERT INTO settings(key, value, at) VALUES(:key, :value, :at) ON CONFLICT(key) DO UPDATE SET value = :value, at = :at"),
   getSetting: db.prepare("SELECT value, at FROM settings WHERE key = ?"),
   delSetting: db.prepare("DELETE FROM settings WHERE key = ?"),
+
+  putMcpToken: db.prepare("INSERT INTO mcp_tokens(name, token_hash, scopes, created_at) VALUES(:name, :token_hash, :scopes, :created_at)"),
+  listMcpTokens: db.prepare("SELECT id, name, scopes, created_at, last_used_at, revoked_at FROM mcp_tokens ORDER BY created_at"),
+  getMcpTokenByHash: db.prepare("SELECT * FROM mcp_tokens WHERE token_hash = ?"),
+  touchMcpToken: db.prepare("UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?"),
+  revokeMcpToken: db.prepare("UPDATE mcp_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL"),
 };
 
 if (fresh) migrateFromJson();
@@ -280,8 +299,8 @@ function tx(fn) {
 /**
  * Enchaîne les pas de migration jusqu'au schéma courant.
  *
- * Une **chaîne** et non un aiguillage : une base v1 doit pouvoir arriver en v3 sans qu'on ait
- * écrit un chemin direct v1 → v3, qui serait un troisième code à vérifier et le seul jamais
+ * Une **chaîne** et non un aiguillage : une base v1 doit pouvoir arriver en v4 sans qu'on ait
+ * écrit un chemin direct v1 → v4, qui serait un troisième code à vérifier et le seul jamais
  * exercé. Chaque pas stampe SA version — jamais `SCHEMA_VERSION`, sinon un pas intermédiaire
  * marquerait la base à jour alors que le suivant n'a pas encore tourné, et un plantage entre les
  * deux laisserait une base qui ment sur sa forme.
@@ -290,8 +309,9 @@ function migrateSchema(fromVersion) {
   let v = fromVersion;
   if (v === 1) { migrateV1toV2(); v = 2; }
   if (v === 2) { migrateV2toV3(); v = 3; }
+  if (v === 3) { migrateV3toV4(); v = 4; }
   if (v !== SCHEMA_VERSION) {
-    throw new Error(`schéma v${fromVersion} inconnu de cette version du serveur (attendu v1, v2 ou v${SCHEMA_VERSION}) — base plus récente que le code ?`);
+    throw new Error(`schéma v${fromVersion} inconnu de cette version du serveur (attendu v1 à v${SCHEMA_VERSION})`);
   }
 }
 
@@ -351,6 +371,25 @@ function migrateV2toV3() {
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}
     throw new Error(`migration du schéma v2 → v3 impossible (${e.message}) — la base est restée en v2`, { cause: e });
+  }
+}
+
+/**
+ * v3 → v4 : la table des jetons d'API MCP.
+ *
+ * Purement additive, comme v2 → v3 : un `CREATE TABLE`, aucune table recréée, aucune ligne
+ * recopiée. Une coupure laisse la base en v3, où elle fonctionne exactement comme avant.
+ */
+function migrateV3toV4() {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(DDL_MCP_TOKENS);
+    db.exec("PRAGMA user_version = 4");
+    db.exec("COMMIT");
+    bootMessages.push("schéma v3 → v4 : table des jetons d'API MCP ajoutée");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw new Error(`migration du schéma v3 → v4 impossible (${e.message}) — la base est restée en v3`, { cause: e });
   }
 }
 
@@ -763,4 +802,65 @@ export function storageInfo() {
     counts: total,
     perMachine,
   };
+}
+
+// ---------------------------------------------------------------- jetons MCP
+import { randomBytes, createHash } from "node:crypto";
+
+export const MCP_SCOPE_CATEGORIES = ["statut", "journal", "boissons", "profils", "grains", "recettes", "reglages"];
+export const MCP_SCOPE_NATURES_PAR_CATEGORIE = {
+  statut: ["lecture"],
+  journal: ["lecture", "action"],
+  boissons: ["lecture", "action"],
+  profils: ["lecture", "action"],
+  grains: ["lecture", "action"],
+  recettes: ["lecture", "action"],
+  reglages: ["lecture", "action"],
+};
+
+const hashToken = (token) => createHash("sha256").update(token, "utf8").digest("hex");
+
+/** `scopes` : tableau de "categorie:nature", ex. ["boissons:lecture"]. Rien par défaut. */
+export function createMcpToken({ name, scopes = [] }) {
+  const token = randomBytes(32).toString("base64url");
+  const createdAt = Date.now();
+  const info = q.putMcpToken.run({
+    name: String(name),
+    token_hash: hashToken(token),
+    scopes: JSON.stringify(scopes),
+    created_at: createdAt,
+  });
+  return { id: Number(info.lastInsertRowid), name: String(name), token, scopes, createdAt };
+}
+
+const rowToTokenSummary = (row) => ({
+  id: row.id,
+  name: row.name,
+  scopes: JSON.parse(row.scopes),
+  createdAt: row.created_at,
+  lastUsedAt: row.last_used_at,
+  revokedAt: row.revoked_at,
+});
+
+export function listMcpTokens() {
+  return q.listMcpTokens.all().map(rowToTokenSummary);
+}
+
+/** Renvoie la ligne complète (avec `revokedAt`) ou `null` — jamais le hash au-delà de cette fonction. */
+export function findMcpTokenByHash(rawToken) {
+  const row = q.getMcpTokenByHash.get(hashToken(rawToken));
+  return row ? rowToTokenSummary(row) : null;
+}
+
+export function touchMcpTokenUse(id) {
+  q.touchMcpToken.run(Date.now(), id);
+}
+
+export function revokeMcpToken(id) {
+  const info = q.revokeMcpToken.run(Date.now(), id);
+  return info.changes > 0;
+}
+
+export function hasScope(tokenRow, categorie, nature) {
+  return tokenRow.scopes.includes(`${categorie}:${nature}`);
 }
