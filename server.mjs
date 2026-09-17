@@ -5310,6 +5310,378 @@ function registerMcpTools(server, tokenRow) {
       return executeDispense(m, args);
     },
   });
+
+  /**
+   * Vide un bac du journal — MÊME fonction que `DELETE /api/journal` (`viderJournal`, la seule
+   * à vider, journaliser le vidage et repousser le cadre SSE). Rien à extraire de plus : le corps
+   * de la route HTTP EST déjà cette fonction.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "clear_journal", categorie: "journal", nature: "action",
+    description: "Vide le journal (machine ou apps). Irréversible.",
+    annotations: { destructiveHint: true },
+    inputSchema: { source: z.enum(["machine", "apps"]) },
+    run: async ({ source }) => ({ source, efface: viderJournal(source) }),
+  });
+
+  /**
+   * Renomme un profil (`0xA5`) ou une recette perso (`0xAB`) — extrait de `/api/profiles/name`.
+   * `kind`/`icon` n'étaient pas dans le croquis du brief mais existent bien côté HTTP (recettes
+   * perso jusqu'à l'index 6, icône explicite) : les omettre aurait rendu l'outil MCP moins
+   * capable que la route qu'il enveloppe, pour aucune raison.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "rename_profile", categorie: "profils", nature: "action",
+    description: "Renomme un profil (ou une recette perso avec kind:\"custom\") de la machine. Écriture persistante, relecture automatique.",
+    annotations: { destructiveHint: true },
+    inputSchema: {
+      profileId: z.number(), name: z.string(),
+      kind: z.enum(["profile", "custom"]).optional(),
+      icon: z.number().optional(),
+      machine: z.string().optional(),
+    },
+    run: async ({ machine, profileId, name, kind, icon } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return renameProfile(m, { index: profileId, name, kind, icon });
+    },
+  });
+
+  /**
+   * ⚠️ **Ce n'est PAS une bascule favori/non-favori.** Le brief nommait cet outil sur un
+   * `favorite: boolean` qui ne correspond à rien côté HTTP : `/api/profiles/favorites` écrit
+   * l'ORDRE d'affichage des boissons favorites d'un profil (`0xAD`, jusqu'à 12 identifiants), pas
+   * un drapeau sur le profil lui-même. Implémenter le brief tel quel aurait produit un outil qui
+   * prétend réussir sans rien faire de correspondant en LAN — exactement ce que le dépôt interdit.
+   * Le nom de l'outil est gardé (déjà arrêté par le plan), l'entrée suit la route réelle.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "set_favorite_profile", categorie: "profils", nature: "action",
+    description: "Définit l'ordre des boissons favorites d'un profil (jusqu'à 12 emplacements, 0xAD). Écriture persistante.",
+    annotations: { destructiveHint: true },
+    inputSchema: { profileId: z.number().optional(), beverageIds: z.array(z.number()), machine: z.string().optional() },
+    run: async ({ machine, ...data } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return setFavoriteProfile(m, data);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "create_bean_preset", categorie: "grains", nature: "action",
+    description: "Crée un preset de grain côté serveur (bibliothèque locale, rien n'est envoyé à la machine).",
+    annotations: { destructiveHint: true },
+    inputSchema: { name: z.string(), grinder: z.number(), temperature: z.number(), aroma: z.number(), roast: z.number().optional(), machine: z.string().optional() },
+    run: async ({ machine, ...data } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return createBeanPreset(m, data);
+    },
+  });
+
+  /**
+   * Mise à jour PARTIELLE, contrairement à `POST /api/beanpresets` qui exige les trois valeurs à
+   * chaque écriture (l'écran renvoie toujours la fiche entière). Les champs omis reprennent la
+   * valeur déjà enregistrée — cohérent avec `inputSchema`, qui les marque tous optionnels sauf
+   * `id`. Erreur réelle si `id` ne désigne rien, jamais un succès silencieux sur une création
+   * fantôme.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "update_bean_preset", categorie: "grains", nature: "action",
+    description: "Met à jour (partiellement) un preset de grain existant.",
+    annotations: { destructiveHint: true },
+    inputSchema: { id: z.string(), name: z.string().optional(), grinder: z.number().optional(), temperature: z.number().optional(), aroma: z.number().optional(), roast: z.number().optional(), machine: z.string().optional() },
+    run: async ({ machine, id, ...data } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return updateBeanPreset(m, id, data);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "delete_bean_preset", categorie: "grains", nature: "action",
+    description: "Supprime un preset de grain. Irréversible.",
+    annotations: { destructiveHint: true },
+    inputSchema: { id: z.string(), machine: z.string().optional() },
+    run: async ({ machine, id } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      const removed = deleteBeanPreset(m, id);
+      return { removed, presets: vueBeanPresets(m) };
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "bean_adapt_scan", categorie: "grains", nature: "action",
+    description: "Lance un balayage Bean Adapt (0xBA) sur la machine physique, index `from`–`to` (0–5 par défaut).",
+    annotations: { destructiveHint: true },
+    inputSchema: { machine: z.string().optional(), from: z.number().optional(), to: z.number().optional() },
+    run: async ({ machine, from, to } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return beanAdaptScan(m, from ?? 0, to ?? 5);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "bean_adapt_save", categorie: "grains", nature: "action",
+    description: "Sauvegarde un réglage Bean Adapt calculé dans un emplacement de la machine.",
+    annotations: { destructiveHint: true },
+    inputSchema: { machine: z.string().optional(), index: z.number(), grinder: z.number(), temperature: z.number(), aroma: z.number(), name: z.string().optional(), visible: z.boolean().optional() },
+    run: async ({ machine, ...args } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return beanAdaptSave(m, args);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "write_recipe", categorie: "recettes", nature: "action",
+    description: "Crée ou met à jour une recette locale (bibliothèque du serveur).",
+    annotations: { destructiveHint: true },
+    inputSchema: { id: z.string().optional(), name: z.string(), beverageId: z.number(), profileId: z.number(), params: z.array(z.object({ id: z.number(), value: z.number() })), machine: z.string().optional() },
+    run: async ({ machine, ...data } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return writeRecipe(m, data);
+    },
+  });
+
+  /**
+   * ⚠️ **Machine-scopé, et pas la route que pointait le brief.** `/api/settings` (POST) ne fait
+   * QUE redemander les réglages à la machine (`startImport`/`startProgram` — rien dans son corps
+   * ne ressemble à `cle`/`value`) : c'est un rafraîchissement, pas une écriture. L'écriture réelle
+   * est `POST /api/settings/write` (`0x90`), qui prend `{cle, value}` ou `{cle, on}` et lit
+   * `m.store`/`m.catalog` : machine-scopée comme `get_settings` (Task 8), jamais globale comme le
+   * supposait le brief. L'outil suit donc `resolveMachineForTool` et le nom de champ réel, `cle`.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "write_settings", categorie: "reglages", nature: "action",
+    description: "Écrit un réglage numérique ou un interrupteur de la machine (0x90). `cle`+`value` pour un réglage, `cle`+`on` pour un interrupteur.",
+    annotations: { destructiveHint: true },
+    inputSchema: { cle: z.string(), value: z.number().optional(), on: z.boolean().optional(), machine: z.string().optional() },
+    run: async ({ machine, ...data } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return writeSettings(m, data);
+    },
+  });
+}
+
+/**
+ * Renomme un profil (`0xA5`) ou une recette perso (`0xAB`) — logique exacte de
+ * `/api/profiles/name`, extraite pour être appelée aussi bien par la route que par l'outil MCP
+ * `rename_profile`. `b` reprend les noms de champs du corps HTTP (`index`, `name`, `kind`,
+ * `icon`) : c'est la même forme des deux côtés, il n'y a rien à traduire.
+ */
+async function renameProfile(m, b) {
+  const perso = b.kind === "custom";
+  const index = Number(b.index);
+  const maxi = perso ? 6 : (m.catalog?.model?.nProfiles ?? 5);
+  if (!Number.isInteger(index) || index < 1 || index > maxi) {
+    throw new Error(`index ${b.index} invalide (1–${maxi})`);
+  }
+  if (m.gen === "striker") {
+    throw new Error("écriture de noms non portée pour la génération Striker (pas de 22 octets)");
+  }
+  const nom = String(b.name ?? "");
+  if (nom.length > 20) throw new Error("nom limité à 20 caractères");
+  const lus = readNames(m.store.machineView(), perso ? "customNames" : "profileNames");
+  const icone = b.icon != null ? Number(b.icon) : lus[index]?.icon;
+  if (!Number.isInteger(icone)) {
+    throw new Error("icône inconnue : lire d'abord les noms, ou fournir `icon`");
+  }
+  const frame = frameSetNames(perso ? 0xab : 0xa5, index, index, [{ name: nom, icon: icone }]);
+  const label = perso ? `Renommer la recette perso ${index} en « ${nom} »` : `Renommer le profil ${index} en « ${nom} »`;
+  const t = startProgram(m, datapointValue(frame), label, 20000, "monitor", {
+    rang: RANG.COMMANDE,
+    i18n: { k: perso ? "renameCustom" : "renameProfile", p: { index, nom } },
+  });
+  // La machine ne repousse rien après un 0xAB/0xA5 (voir la route HTTP) : il faut relire le bloc
+  // qui contient l'index écrit.
+  const famille = perso ? CUSTOM_NAME_PROPS : PROFILE_NAME_PROPS;
+  const bloc = famille
+    .filter((x) => x.stride === STRIDE_CLASSIC && x.first <= index)
+    .sort((a, b) => b.first - a.first)[0] ?? null;
+  const relecture = bloc
+    ? startImport(m, [bloc.prop], 0, { i18n: { k: "readOne", p: { prop: bloc.prop } } })
+    : null;
+  const reg = await postLocalReg(m);
+  return {
+    sent: true, kind: perso ? "custom" : "profile", index, name: nom, icon: icone,
+    frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
+    reread: bloc?.prop ?? null,
+    rereadTaskId: relecture?.taskId ?? null,
+    register: reg, ...tacheRendue(t),
+  };
+}
+
+/**
+ * Ordre des boissons favorites d'un profil (`0xAD`) — logique exacte de
+ * `/api/profiles/favorites`, extraite pour la route ET pour l'outil MCP `set_favorite_profile`.
+ */
+async function setFavoriteProfile(m, b) {
+  const profil = Number(b.profileId ?? m.activeProfile ?? 1);
+  const nMax = m.catalog?.model?.nProfiles ?? 5;
+  if (!Number.isInteger(profil) || profil < 1 || profil > nMax) {
+    throw new Error(`profil ${b.profileId} invalide (1–${nMax})`);
+  }
+  const ordre = Array.isArray(b.beverageIds) ? b.beverageIds.map(Number) : null;
+  if (!ordre) throw new Error("`beverageIds` manquant");
+  if (ordre.length > 12) throw new Error(`12 emplacements au maximum (${ordre.length} fournis)`);
+  const inconnue = ordre.find((id) => id !== 0 && !m.catalog.byId(id));
+  if (inconnue !== undefined) {
+    throw new Error(`boisson ${inconnue} inconnue sur ${m.catalog.model.type}`);
+  }
+  const frame = frameSetFavorites(profil, ordre);
+  const t = startProgram(m, datapointValue(frame), `Ordre des favoris du profil ${profil}`, 20000, "monitor", { rang: RANG.COMMANDE, i18n: { k: "favouritesOrder", p: { profil } } });
+  const prop = `d${String(260 + profil).padStart(3, "0")}_${profil}_rec_priority`;
+  startImport(m, [prop], 0, { label: `Ordre d'affichage du profil ${profil}`, i18n: { k: "displayOrder", p: { profil } } });
+  const reg = await postLocalReg(m);
+  return {
+    sent: true, profileId: profil, beverageIds: ordre,
+    frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
+    register: reg, ...tacheRendue(t),
+  };
+}
+
+/** Bornes communes à un preset de grain — partagées par la route HTTP et les deux outils MCP. */
+function validateBeanPresetBounds(grinder, temperature, aroma, roast) {
+  if (!(grinder >= GRINDER_MIN && grinder <= GRINDER_MAX)) throw new Error(`mouture hors bornes (${GRINDER_MIN}–${GRINDER_MAX})`);
+  if (!(aroma >= AROMA_MIN && aroma <= AROMA_MAX)) throw new Error(`arôme hors bornes (${AROMA_MIN}–${AROMA_MAX})`);
+  if (!(temperature >= TEMPERATURE_MIN && temperature <= TEMPERATURE_MAX)) throw new Error(`température hors bornes (${TEMPERATURE_MIN}–${TEMPERATURE_MAX})`);
+  if (!torrefactionValide(roast)) {
+    throw new Error(`torréfaction inconnue (attendu ${TORREFACTIONS.join(", ")} ou aucune)`);
+  }
+}
+
+/** Toujours une CRÉATION : `id` forcé à `null`, jamais celui d'un preset existant. */
+function createBeanPreset(m, data) {
+  const grinder = Number(data.grinder), temperature = Number(data.temperature), aroma = Number(data.aroma);
+  const roast = data.roast === undefined ? null : data.roast;
+  validateBeanPresetBounds(grinder, temperature, aroma, roast);
+  const entree = putBeanPreset(m, { id: null, name: data.name, grinder, temperature, aroma, roast });
+  const presets = vueBeanPresets(m);
+  return { ok: true, preset: presets.find((x) => x.id === entree.id) ?? entree, presets };
+}
+
+/**
+ * Mise à jour PARTIELLE d'un preset existant — contrairement à `POST /api/beanpresets`, qui
+ * exige les trois valeurs à chaque envoi (l'écran renvoie toujours la fiche entière), un champ
+ * omis ici reprend la valeur déjà enregistrée. Erreur réelle si `id` ne désigne rien.
+ */
+function updateBeanPreset(m, id, data) {
+  const existant = beanPresets(m).find((x) => x.id === id);
+  if (!existant) throw new Error(`configuration « ${id} » inconnue`);
+  const grinder = data.grinder === undefined ? existant.grinder : Number(data.grinder);
+  const temperature = data.temperature === undefined ? existant.temperature : Number(data.temperature);
+  const aroma = data.aroma === undefined ? existant.aroma : Number(data.aroma);
+  const roast = data.roast === undefined ? existant.roast : data.roast;
+  const name = data.name === undefined ? existant.name : data.name;
+  validateBeanPresetBounds(grinder, temperature, aroma, roast);
+  const entree = putBeanPreset(m, { id, name, grinder, temperature, aroma, roast });
+  const presets = vueBeanPresets(m);
+  return { ok: true, preset: presets.find((x) => x.id === entree.id) ?? entree, presets };
+}
+
+/**
+ * Un balayage Bean Adapt (`0xBA` par index) — logique exacte de `/api/beanadapt/scan`, extraite
+ * pour la route ET pour l'outil MCP `bean_adapt_scan`.
+ */
+async function beanAdaptScan(m, from, to) {
+  if (!(Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to <= 9 && to >= from)) {
+    throw new Error("plage d'index invalide");
+  }
+  const t = scanBeans(m, from, to);
+  const reg = await postLocalReg(m);
+  return { started: t.ok, from, to, register: reg, ...tacheRendue(t) };
+}
+
+/**
+ * Écrit un réglage Bean Adapt dans un emplacement de la machine — logique exacte de
+ * `/api/beanadapt/save`, extraite pour la route ET pour l'outil MCP `bean_adapt_save`. `b`
+ * reprend les noms de champs du corps HTTP.
+ */
+async function beanAdaptSave(m, b) {
+  const index = Number(b.index);
+  const grinder = Number(b.grinder);
+  const temperature = Number(b.temperature);
+  const aroma = Number(b.aroma);
+  if (!Number.isInteger(index) || index < 0 || index > 5) throw new Error(`index ${b.index} invalide`);
+  if (!(grinder >= GRINDER_MIN && grinder <= GRINDER_MAX)) throw new Error(`mouture hors bornes (${GRINDER_MIN}–${GRINDER_MAX})`);
+  if (!(aroma >= AROMA_MIN && aroma <= AROMA_MAX)) throw new Error(`arôme hors bornes (${AROMA_MIN}–${AROMA_MAX})`);
+  if (!(temperature >= TEMPERATURE_MIN && temperature <= TEMPERATURE_MAX)) throw new Error(`température hors bornes (${TEMPERATURE_MIN}–${TEMPERATURE_MAX})`);
+  const name = typeof b.name === "string" ? b.name : "";
+  const visible = b.visible !== false;
+  const frame = frameBeanSystemSave(index, name, grinder, temperature, aroma, visible);
+  const t = startProgram(m, datapointValue(frame), `Bean System ${index} → mouture ${grinder}, temp ${temperature}, arôme ${aroma}`, 20000, "monitor", { rang: RANG.COMMANDE, i18n: { k: "beanWrite", p: { index, mouture: grinder, temperature, arome: aroma } } });
+  const reg = await postLocalReg(m);
+  return {
+    sent: true,
+    frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
+    wrote: { index, name: name.slice(0, 20), grinder, temperature, aroma, visible },
+    register: reg,
+    ...tacheRendue(t),
+  };
+}
+
+/**
+ * Enregistre ou remplace une recette locale — logique exacte de `/api/recipes` POST, extraite
+ * pour la route ET pour l'outil MCP `write_recipe`.
+ */
+function writeRecipe(m, r) {
+  if (!r?.id) throw new Error("id de recette manquant");
+  const bev = m.catalog.byId(Number(r.beverageId));
+  if (!bev) throw new Error(`boisson ${r.beverageId} inconnue sur ${m.catalog.model.type}`);
+  const prof = Number(r.profileId) || 1;
+  if (!(prof >= 1 && prof <= m.catalog.model.nProfiles)) {
+    throw new Error(`profil ${prof} invalide (ce modèle en a ${m.catalog.model.nProfiles})`);
+  }
+  const nomMachine = machineBeverageNames(m.store.machineView())[bev.id]?.name ?? null;
+  m.store.putRecipe({ ...normaliseRecette(r, bev), apercu: { label: nomMachine ?? bev.label, slug: bev.slug, category: bev.category, milk: !!bev.milk } });
+  return vueRecettes(m);
+}
+
+/**
+ * Écrit un réglage numérique ou un interrupteur — `0x90`, logique exacte de
+ * `/api/settings/write`, extraite pour la route ET pour l'outil MCP `write_settings`.
+ *
+ * ⚠️ **Machine-scopée** — voir la remarque à l'enregistrement de l'outil : le brief supposait
+ * `write_settings` indépendant de la machine, mais cette écriture lit `m.store.getMeta("reglages")`
+ * et `m.catalog.model` exactement comme `get_settings`/`buildSettingsPayload` (Task 8).
+ */
+async function writeSettings(m, b) {
+  const brut = m.store.getMeta("reglages") ?? {};
+  const modele = m.catalog?.model ?? {};
+  const dispo = (d) => (d == null ? true : modele[d] === true);
+  let r = REGLAGE_PAR_CLE.get(String(b.cle));
+  let valeur;
+  let libelle;
+  let cleLibelle = null;
+  if (r) {
+    if (!dispo(r.supporte)) throw new Error(`réglage « ${r.cle} » non supporté par ce modèle`);
+    valeur = Number(b.value);
+    if (!Number.isInteger(valeur) || valeur < r.min || valeur > r.max) {
+      throw new Error(`valeur hors bornes (${r.min}–${r.max})`);
+    }
+    libelle = `Réglage ${r.cle} = ${valeur}`;
+    cleLibelle = { k: "settingWrite", p: { valeur }, refs: { reglage: { ns: "setting", cle: r.cle } } };
+  } else {
+    const porteur = REGLAGES.find((x) => x.bits?.some((y) => y.cle === String(b.cle)));
+    const bit = porteur?.bits.find((y) => y.cle === String(b.cle));
+    if (!bit) throw new Error(`réglage « ${b.cle} » inconnu`);
+    if (!dispo(bit.supporte)) throw new Error(`réglage « ${bit.cle} » non supporté par ce modèle`);
+    const courant = brut[porteur.addr]?.value;
+    if (courant == null) {
+      throw new Error(`réglage « ${bit.cle} » : lire d'abord les réglages — sans la valeur courante du champ de bits, l'écrire éteindrait les autres`);
+    }
+    const on = b.on === true;
+    const poser = bit.inverse ? !on : on;
+    valeur = poser ? (courant | (1 << bit.bit)) & 0xff : courant & ~(1 << bit.bit) & 0xff;
+    r = porteur;
+    libelle = `Réglage ${bit.cle} ${on ? "activé" : "désactivé"}`;
+    cleLibelle = { k: "settingToggle", p: { actif: on ? 1 : 0 }, refs: { reglage: { ns: "setting", cle: bit.cle } } };
+  }
+  const frame = frameParamWrite(r.addr, valeur);
+  const t = startProgram(m, datapointValue(frame), libelle, 20000, "monitor", { rang: RANG.COMMANDE, i18n: cleLibelle });
+  noteReglages(m, [{ addr: r.addr, value: valeur }], "écrit (non relu)");
+  const reg = await postLocalReg(m);
+  return {
+    sent: true, addr: r.addr, value: valeur,
+    frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
+    register: reg, ...tacheRendue(t),
+  };
 }
 
 // --- API de contrôle ---
@@ -5888,17 +6260,14 @@ async function handleApi(req, res) {
    */
   if (url === "/api/beanadapt/scan" && req.method === "POST") {
     const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-    const from = Number(b.from ?? 0);
-    const to = Number(b.to ?? 5);
-    if (!(Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to <= 9 && to >= from)) {
-      return raw(res, JSON.stringify({ error: "plage d'index invalide" }), 400);
-    }
     // Plus de refus « un balayage est déjà en cours » : la file l'encaisse, et la clé de fusion
     // empêche deux balayages identiques de coexister. Refuser était l'aveu qu'un deuxième aurait
     // écrasé le premier.
-    const t = scanBeans(m, from, to);
-    const reg = await postLocalReg(m);
-    return raw(res, JSON.stringify({ started: t.ok, from, to, register: reg, ...tacheRendue(t) }));
+    try {
+      return raw(res, JSON.stringify(await beanAdaptScan(m, Number(b.from ?? 0), Number(b.to ?? 5))));
+    } catch (e) {
+      return raw(res, JSON.stringify({ error: e.message }), 400);
+    }
   }
 
   if (url === "/api/beanadapt" && req.method === "GET") {
@@ -5948,15 +6317,16 @@ async function handleApi(req, res) {
     const grinder = Number(b.grinder);
     const temperature = Number(b.temperature);
     const aroma = Number(b.aroma);
-    if (!(grinder >= GRINDER_MIN && grinder <= GRINDER_MAX)) return raw(res, JSON.stringify({ error: `mouture hors bornes (${GRINDER_MIN}–${GRINDER_MAX})` }), 400);
-    if (!(aroma >= AROMA_MIN && aroma <= AROMA_MAX)) return raw(res, JSON.stringify({ error: `arôme hors bornes (${AROMA_MIN}–${AROMA_MAX})` }), 400);
-    if (!(temperature >= TEMPERATURE_MIN && temperature <= TEMPERATURE_MAX)) return raw(res, JSON.stringify({ error: `température hors bornes (${TEMPERATURE_MIN}–${TEMPERATURE_MAX})` }), 400);
     /* La torréfaction est validée contre la MÊME liste que le rail de l'interface, celle de
        `image-grains.mjs`. Un niveau que la table d'images ne nomme pas s'enregistrerait sans
        erreur et n'afficherait aucun visuel — une fiche muette sans cause visible. */
     const roast = b.roast === undefined ? null : b.roast;
-    if (!torrefactionValide(roast)) {
-      return raw(res, JSON.stringify({ error: `torréfaction inconnue (attendu ${TORREFACTIONS.join(", ")} ou aucune)` }), 400);
+    // `validateBeanPresetBounds` : les mêmes bornes que les outils MCP `create_bean_preset` /
+    // `update_bean_preset`, une seule fois.
+    try {
+      validateBeanPresetBounds(grinder, temperature, aroma, roast);
+    } catch (e) {
+      return raw(res, JSON.stringify({ error: e.message }), 400);
     }
     /**
      * L'image, s'il y en a une, est décodée **avant** d'écrire quoi que ce soit.
@@ -6169,68 +6539,14 @@ async function handleApi(req, res) {
    */
   if (url === "/api/profiles/name" && req.method === "POST") {
     const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-    const perso = b.kind === "custom";
-    const index = Number(b.index);
-    const maxi = perso ? 6 : (m.catalog?.model?.nProfiles ?? 5);
-    if (!Number.isInteger(index) || index < 1 || index > maxi) {
-      return raw(res, JSON.stringify({ error: `index ${b.index} invalide (1–${maxi})` }), 400);
+    // `renameProfile` porte toute la logique (voir plus haut, § outils MCP) : la route et l'outil
+    // `rename_profile` appellent la MÊME fonction.
+    try {
+      return raw(res, JSON.stringify(await renameProfile(m, b)));
+    } catch (e) {
+      const needsRead = e.message === "icône inconnue : lire d'abord les noms, ou fournir `icon`";
+      return raw(res, JSON.stringify({ error: e.message, ...(needsRead ? { needsRead: true } : {}) }), needsRead ? 409 : 400);
     }
-    if (m.gen === "striker") {
-      return raw(res, JSON.stringify({ error: "écriture de noms non portée pour la génération Striker (pas de 22 octets)" }), 400);
-    }
-    const nom = String(b.name ?? "");
-    if (nom.length > 20) return raw(res, JSON.stringify({ error: "nom limité à 20 caractères" }), 400);
-    const lus = readNames(m.store.machineView(), perso ? "customNames" : "profileNames");
-    const icone = b.icon != null ? Number(b.icon) : lus[index]?.icon;
-    if (!Number.isInteger(icone)) {
-      return raw(res, JSON.stringify({ error: "icône inconnue : lire d'abord les noms, ou fournir `icon`", needsRead: true }), 409);
-    }
-    const frame = frameSetNames(perso ? 0xab : 0xa5, index, index, [{ name: nom, icon: icone }]);
-    const label = perso ? `Renommer la recette perso ${index} en « ${nom} »` : `Renommer le profil ${index} en « ${nom} »`;
-    const t = startProgram(m, datapointValue(frame), label, 20000, "monitor", {
-      rang: RANG.COMMANDE,
-      i18n: { k: perso ? "renameCustom" : "renameProfile", p: { index, nom } },
-    });
-    /**
-     * **La machine ne repousse RIEN après un `0xAB` / `0xA5`, et il faut donc relire.**
-     *
-     * Constaté en direct : la tâche d'écriture finit « faite », l'appareil affiche bel et bien la
-     * nouvelle icône — et notre cache garde l'ancienne, indéfiniment. Rapporté tel quel : « l'image
-     * est changée sur la machine mais pas dans l'application ».
-     *
-     * ⚠️ C'est l'INVERSE de `0x83`, qui pousse spontanément les cinq profils après une écriture de
-     * recette (voir `beverages.mjs`, § recettes perso par profil). Rien ne laissait deviner cette
-     * asymétrie, et son coût est le pire qui soit pour une écriture : elle réussit, et la page
-     * continue d'affirmer le contraire — sans le moindre signe que la valeur affichée est périmée.
-     *
-     * On ne relit QUE le bloc qui contient l'index écrit, pas les quatre propriétés de la famille :
-     * c'est le même raisonnement que pour l'écriture, qui ne touche qu'une entrée. Rang `LECTURE`,
-     * donc une commande passe devant — et la relecture reste derrière l'écriture qu'elle suit,
-     * puisque `enfiler` insère avant la première tâche de rang STRICTEMENT inférieur.
-     *
-     * Aucun `checksumMark` n'est posé au passage, volontairement : `startImport` n'en pose pas, et
-     * marquer les noms « à jour » ici risquerait de supprimer une relecture ultérieure. Une lecture
-     * redondante ne coûte qu'un aller-retour ; une lecture supprimée à tort n'est récupérable
-     * qu'avec `force: true`.
-     */
-    const famille = perso ? CUSTOM_NAME_PROPS : PROFILE_NAME_PROPS;
-    const bloc = famille
-      .filter((x) => x.stride === STRIDE_CLASSIC && x.first <= index)
-      .sort((a, b) => b.first - a.first)[0] ?? null;
-    const relecture = bloc
-      ? startImport(m, [bloc.prop], 0, { i18n: { k: "readOne", p: { prop: bloc.prop } } })
-      : null;
-
-    const reg = await postLocalReg(m);
-    return raw(res, JSON.stringify({
-      sent: true, kind: perso ? "custom" : "profile", index, name: nom, icon: icone,
-      frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
-      // Le client sait ainsi qu'une relecture suit, et laquelle : sans elle il afficherait
-      // l'ancienne valeur en croyant l'écriture sans effet.
-      reread: bloc?.prop ?? null,
-      rereadTaskId: relecture?.taskId ?? null,
-      register: reg, ...tacheRendue(t),
-    }));
   }
   /**
    * **Ordre des favoris d'un profil — `0xAD`, persistant.**
@@ -6243,29 +6559,13 @@ async function handleApi(req, res) {
    */
   if (url === "/api/profiles/favorites" && req.method === "POST") {
     const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-    const profil = Number(b.profileId ?? m.activeProfile ?? 1);
-    const nMax = m.catalog?.model?.nProfiles ?? 5;
-    if (!Number.isInteger(profil) || profil < 1 || profil > nMax) {
-      return raw(res, JSON.stringify({ error: `profil ${b.profileId} invalide (1–${nMax})` }), 400);
+    // `setFavoriteProfile` porte toute la logique (voir plus haut, § outils MCP) : la route et
+    // l'outil `set_favorite_profile` appellent la MÊME fonction.
+    try {
+      return raw(res, JSON.stringify(await setFavoriteProfile(m, b)));
+    } catch (e) {
+      return raw(res, JSON.stringify({ error: e.message }), 400);
     }
-    const ordre = Array.isArray(b.beverageIds) ? b.beverageIds.map(Number) : null;
-    if (!ordre) return raw(res, JSON.stringify({ error: "`beverageIds` manquant" }), 400);
-    if (ordre.length > 12) return raw(res, JSON.stringify({ error: `12 emplacements au maximum (${ordre.length} fournis)` }), 400);
-    const inconnue = ordre.find((id) => id !== 0 && !m.catalog.byId(id));
-    if (inconnue !== undefined) {
-      return raw(res, JSON.stringify({ error: `boisson ${inconnue} inconnue sur ${m.catalog.model.type}` }), 400);
-    }
-    const frame = frameSetFavorites(profil, ordre);
-    const t = startProgram(m, datapointValue(frame), `Ordre des favoris du profil ${profil}`, 20000, "monitor", { rang: RANG.COMMANDE, i18n: { k: "favouritesOrder", p: { profil } } });
-    // Puis on relit : c'est la seule confirmation disponible, la machine n'accuse pas l'écriture.
-    const prop = `d${String(260 + profil).padStart(3, "0")}_${profil}_rec_priority`;
-    startImport(m, [prop], 0, { label: `Ordre d'affichage du profil ${profil}`, i18n: { k: "displayOrder", p: { profil } } });
-    const reg = await postLocalReg(m);
-    return raw(res, JSON.stringify({
-      sent: true, profileId: profil, beverageIds: ordre,
-      frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
-      register: reg, ...tacheRendue(t),
-    }));
   }
   /**
    * **Les deux modes de monitor restés hors Wi-Fi — `0x60` et `0x70`.**
@@ -6340,78 +6640,25 @@ async function handleApi(req, res) {
    */
   if (url === "/api/settings/write" && req.method === "POST") {
     const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-    const brut = m.store.getMeta("reglages") ?? {};
-    const modele = m.catalog?.model ?? {};
-    const dispo = (d) => (d == null ? true : modele[d] === true);  // voir `vueReglages`
-    let r = REGLAGE_PAR_CLE.get(String(b.cle));
-    let valeur;
-    let libelle;
-    let cleLibelle = null;
-    if (r) {
-      if (!dispo(r.supporte)) return raw(res, JSON.stringify({ error: `réglage « ${r.cle} » non supporté par ce modèle` }), 400);
-      valeur = Number(b.value);
-      if (!Number.isInteger(valeur) || valeur < r.min || valeur > r.max) {
-        return raw(res, JSON.stringify({ error: `valeur hors bornes (${r.min}–${r.max})` }), 400);
-      }
-      libelle = `Réglage ${r.cle} = ${valeur}`;
-      cleLibelle = { k: "settingWrite", p: { valeur }, refs: { reglage: { ns: "setting", cle: r.cle } } };
-    } else {
-      // Un interrupteur du champ de bits.
-      const porteur = REGLAGES.find((x) => x.bits?.some((y) => y.cle === String(b.cle)));
-      const bit = porteur?.bits.find((y) => y.cle === String(b.cle));
-      if (!bit) return raw(res, JSON.stringify({ error: `réglage « ${b.cle} » inconnu` }), 400);
-      if (!dispo(bit.supporte)) return raw(res, JSON.stringify({ error: `réglage « ${bit.cle} » non supporté par ce modèle` }), 400);
-      const courant = brut[porteur.addr]?.value;
-      if (courant == null) {
-        return raw(res, JSON.stringify({ error: `réglage « ${bit.cle} » : lire d'abord les réglages — sans la valeur courante du champ de bits, l'écrire éteindrait les autres`, needsRead: true }), 409);
-      }
-      const on = b.on === true;
-      // `inverse` : le bit à 1 DÉSACTIVE. C'est l'app qui en décide ainsi, pas nous.
-      const poser = bit.inverse ? !on : on;
-      valeur = poser ? (courant | (1 << bit.bit)) & 0xff : courant & ~(1 << bit.bit) & 0xff;
-      r = porteur;
-      libelle = `Réglage ${bit.cle} ${on ? "activé" : "désactivé"}`;
-      cleLibelle = { k: "settingToggle", p: { actif: on ? 1 : 0 }, refs: { reglage: { ns: "setting", cle: bit.cle } } };
+    // `writeSettings` porte toute la logique (voir plus haut, § outils MCP) : la route et l'outil
+    // `write_settings` appellent la MÊME fonction.
+    try {
+      return raw(res, JSON.stringify(await writeSettings(m, b)));
+    } catch (e) {
+      const needsRead = /lire d'abord les réglages/.test(e.message);
+      return raw(res, JSON.stringify({ error: e.message, ...(needsRead ? { needsRead: true } : {}) }), needsRead ? 409 : 400);
     }
-    const frame = frameParamWrite(r.addr, valeur);
-    const t = startProgram(m, datapointValue(frame), libelle, 20000, "monitor", { rang: RANG.COMMANDE, i18n: cleLibelle });
-    // On note tout de suite la valeur envoyée, marquée comme telle : la machine ne confirme pas une
-    // écriture de réglage, donc « lu » et « envoyé » ne doivent pas se ressembler dans l'interface.
-    noteReglages(m, [{ addr: r.addr, value: valeur }], "écrit (non relu)");
-    const reg = await postLocalReg(m);
-    return raw(res, JSON.stringify({
-      sent: true, addr: r.addr, value: valeur,
-      frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
-      register: reg, ...tacheRendue(t),
-    }));
   }
 
   if (url === "/api/beanadapt/save" && req.method === "POST") {
     const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-    const index = Number(b.index);
-    const grinder = Number(b.grinder);
-    const temperature = Number(b.temperature);
-    const aroma = Number(b.aroma);
-    if (!Number.isInteger(index) || index < 0 || index > 5) return raw(res, JSON.stringify({ error: `index ${b.index} invalide` }), 400);
-    if (!(grinder >= GRINDER_MIN && grinder <= GRINDER_MAX)) return raw(res, JSON.stringify({ error: `mouture hors bornes (${GRINDER_MIN}–${GRINDER_MAX})` }), 400);
-    if (!(aroma >= AROMA_MIN && aroma <= AROMA_MAX)) return raw(res, JSON.stringify({ error: `arôme hors bornes (${AROMA_MIN}–${AROMA_MAX})` }), 400);
-    if (!(temperature >= TEMPERATURE_MIN && temperature <= TEMPERATURE_MAX)) return raw(res, JSON.stringify({ error: `température hors bornes (${TEMPERATURE_MIN}–${TEMPERATURE_MAX})` }), 400);
-    const name = typeof b.name === "string" ? b.name : "";
-    const visible = b.visible !== false;
-    const frame = frameBeanSystemSave(index, name, grinder, temperature, aroma, visible);
-    const t = startProgram(m, datapointValue(frame), `Bean System ${index} → mouture ${grinder}, temp ${temperature}, arôme ${aroma}`, 20000, "monitor", { rang: RANG.COMMANDE, i18n: { k: "beanWrite", p: { index, mouture: grinder, temperature, arome: aroma } } });
-    const reg = await postLocalReg(m);
-    return raw(res, JSON.stringify({
-      sent: true,
-      frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(),
-      wrote: { index, name: name.slice(0, 20), grinder, temperature, aroma, visible },
-      register: reg,
-      // `tacheRendue` manquait ici, et ici SEULEMENT : tous les autres points de mise en file
-      // renvoient `taskId`/`position`, comme le contrat l'annonce. Sans eux l'interface ne pouvait
-      // pas suivre l'écriture d'un profil de grains — ni l'annuler. Trouvé par ESLint, qui a
-      // signalé que la valeur de `startProgram` n'était jamais lue.
-      ...tacheRendue(t),
-    }));
+    // `beanAdaptSave` porte toute la logique (voir plus haut, § outils MCP) : la route et l'outil
+    // `bean_adapt_save` appellent la MÊME fonction.
+    try {
+      return raw(res, JSON.stringify(await beanAdaptSave(m, b)));
+    } catch (e) {
+      return raw(res, JSON.stringify({ error: e.message }), 400);
+    }
   }
 
   /**
@@ -6652,29 +6899,13 @@ async function handleApi(req, res) {
     if (req.method === "GET") return raw(res, JSON.stringify(buildRecipesPayload(m)));
     if (req.method === "POST") {
       const r = JSON.parse((await readBody(req)).toString("utf8"));
-      // L'id est la clé primaire : sans lui, l'ancien code écrivait une recette anonyme que la
-      // suivante écrasait en silence.
-      if (!r?.id) return raw(res, JSON.stringify({ error: "id de recette manquant" }), 400);
-      const bev = m.catalog.byId(Number(r.beverageId));
-      // Refuser plutôt qu'enregistrer une recette qui ne désigne rien sur cette machine : elle
-      // s'afficherait sans boisson et ne pourrait ni se préparer ni se transférer.
-      if (!bev) return raw(res, JSON.stringify({ error: `boisson ${r.beverageId} inconnue sur ${m.catalog.model.type}` }), 400);
-      const prof = Number(r.profileId) || 1;
-      if (!(prof >= 1 && prof <= m.catalog.model.nProfiles)) {
-        return raw(res, JSON.stringify({ error: `profil ${prof} invalide (ce modèle en a ${m.catalog.model.nProfiles})` }), 400);
+      // `writeRecipe` porte toute la logique (voir plus haut, § outils MCP) : la route et l'outil
+      // `write_recipe` appellent la MÊME fonction.
+      try {
+        return raw(res, JSON.stringify(writeRecipe(m, r)));
+      } catch (e) {
+        return raw(res, JSON.stringify({ error: e.message }), 400);
       }
-      /**
-       * `apercu` est (re)posé à CHAQUE enregistrement : c'est le seul moment où l'on sait qu'il est
-       * à jour, et un aperçu périmé afficherait l'ancien nom d'une recette renommée sur la machine.
-       *
-       * Le libellé est celui que l'utilisateur VOIT — le nom saisi sur la machine s'il y en a un,
-       * le libellé du catalogue sinon. `m.catalog.byId` ne connaît que le second : un aperçu qui
-       * dirait « Recette perso 1 » là où l'écran affiche « Lacteso » ne servirait pas à ce pour
-       * quoi il existe, se retrouver quand le catalogue ne répond plus.
-       */
-      const nomMachine = machineBeverageNames(m.store.machineView())[bev.id]?.name ?? null;
-      m.store.putRecipe({ ...normaliseRecette(r, bev), apercu: { label: nomMachine ?? bev.label, slug: bev.slug, category: bev.category, milk: !!bev.milk } });
-      return raw(res, JSON.stringify(vueRecettes(m)));
     }
     if (req.method === "DELETE") { const id = new URL(req.url, "http://x").searchParams.get("id"); m.store.deleteRecipe(id); return raw(res, JSON.stringify(vueRecettes(m))); }
   }
