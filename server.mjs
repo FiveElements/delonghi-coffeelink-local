@@ -4763,6 +4763,7 @@ async function handleMcp(req, res) {
  * qui l'enveloppe). `run` reçoit les arguments déjà validés/parsés et renvoie une valeur JS
  * ordinaire ; c'est cette fonction qui la met en forme `CallToolResult` (ou `isError`).
  */
+// eslint-disable-next-line no-unused-vars -- defineMcpTool a son premier appelant en Task 7 (registerMcpTools reste vide jusque-là)
 function defineMcpTool(server, tokenRow, { name, categorie, nature, description, inputSchema, annotations = {}, run }) {
   if (!hasScope(tokenRow, categorie, nature)) return;
   server.registerTool(name, { description, inputSchema, annotations }, async (args) => {
