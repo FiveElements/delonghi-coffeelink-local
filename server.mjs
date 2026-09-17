@@ -49,10 +49,14 @@ import { httpJson, echangeClesVersApp, analyserCommandes, paquetDatapoint, paque
 import { RANG, DELAIS, MAX_FILE, nouvelleFile, tache, pasLecture, pasTrame, enfiler, aServir,
          reponse as apparier, contact as contactMachine, tic, vue as vueFile, annuler,
          courante, vide } from "./src/lib/tasks.mjs";
-import { bootMessages as storeBootMessages, storageInfo, forMachine, listMachines, createMachine, setMachineLabel, deleteMachine, getSetting, setSetting, clearSetting, DEFAULT_MACHINE, createMcpToken, listMcpTokens, revokeMcpToken, MCP_SCOPE_CATEGORIES, MCP_SCOPE_NATURES_PAR_CATEGORIE } from "./src/lib/store.mjs";
+import { bootMessages as storeBootMessages, storageInfo, forMachine, listMachines, createMachine, setMachineLabel, deleteMachine, getSetting, setSetting, clearSetting, DEFAULT_MACHINE, createMcpToken, listMcpTokens, revokeMcpToken, findMcpTokenByHash, touchMcpTokenUse, MCP_SCOPE_CATEGORIES, MCP_SCOPE_NATURES_PAR_CATEGORIE } from "./src/lib/store.mjs";
 // Identification du modele : la machine publie son numero de serie, et les 5 chiffres qui
 // indexent la table constructeur sont dedans. Aucun cloud — voir machine-models.mjs.
 import { MODELS, MODELS_TABLE_VERSION, SERIAL_PROP, findModel, identify as identifyModel } from "./src/lib/machine-models.mjs";
+// Serveur MCP : transport Streamable HTTP (point d'entrée unique POST/GET/DELETE), monté sur
+// /mcp. `McpServer` construit un serveur SANS transport ; `connect()` l'attache à CETTE requête.
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 // --- .env.local ---
 try {
@@ -4722,6 +4726,36 @@ function deleteBeanPreset(m, id) {
   return true;
 }
 
+/**
+ * `/mcp` — Streamable HTTP (transport courant de la spec MCP, un seul point d'entrée pour
+ * POST/GET/DELETE), monté au même niveau que `/api/*` dans `createServer` ci-dessous.
+ *
+ * L'authentification est vérifiée AVANT que quoi que ce soit n'atteigne le SDK : un jeton
+ * absent, inconnu ou révoqué ne doit jamais faire fonctionner le protocole, même partiellement.
+ */
+async function handleMcp(req, res) {
+  const auth = req.headers.authorization ?? "";
+  const m = /^Bearer (.+)$/.exec(auth);
+  if (!m) return raw(res, JSON.stringify({ error: "jeton d'API manquant (en-tête Authorization: Bearer <jeton>)" }), 401);
+  const tokenRow = findMcpTokenByHash(m[1]);
+  if (!tokenRow || tokenRow.revokedAt) return raw(res, JSON.stringify({ error: "jeton d'API invalide ou révoqué" }), 401);
+  touchMcpTokenUse(tokenRow.id);
+
+  const server = new McpServer({ name: "delonghi-lan-server", version: "0.1.0" });
+  registerMcpTools(server, tokenRow); // défini en Task 6
+
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  res.on("close", () => transport.close());
+  await server.connect(transport);
+
+  const body = req.method === "POST" ? JSON.parse((await readBody(req)).toString("utf8") || "{}") : undefined;
+  await transport.handleRequest(req, res, body);
+}
+
+function registerMcpTools(_server, _tokenRow) {
+  // Catalogue ajouté en Task 6 — aucun outil pour l'instant, juste de quoi valider le transport.
+}
+
 // --- API de contrôle ---
 async function handleApi(req, res) {
   const url = req.url.split("?")[0];
@@ -6379,6 +6413,7 @@ createServer((req, res) => {
   if (PROXY.actif && u.split("?")[0] === "/regtoken.json") return handleAppRegtoken(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
   if (PROXY.actif && u.split("?")[0] === "/local_reg.json") return handleAppReg(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
   if (u.startsWith("/local_lan/")) return handleLan(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
+  if (u === "/mcp" || u.startsWith("/mcp?")) return handleMcp(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
   if (u.startsWith("/api/")) return handleApi(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
   return handle(req, res);
 }).listen(CFG.port, "0.0.0.0", () => {
