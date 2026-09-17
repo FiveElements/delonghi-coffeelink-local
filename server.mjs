@@ -49,7 +49,7 @@ import { httpJson, echangeClesVersApp, analyserCommandes, paquetDatapoint, paque
 import { RANG, DELAIS, MAX_FILE, nouvelleFile, tache, pasLecture, pasTrame, enfiler, aServir,
          reponse as apparier, contact as contactMachine, tic, vue as vueFile, annuler,
          courante, vide } from "./src/lib/tasks.mjs";
-import { bootMessages as storeBootMessages, storageInfo, forMachine, listMachines, createMachine, setMachineLabel, deleteMachine, getSetting, setSetting, clearSetting, DEFAULT_MACHINE, createMcpToken, listMcpTokens, revokeMcpToken, findMcpTokenByHash, touchMcpTokenUse, MCP_SCOPE_CATEGORIES, MCP_SCOPE_NATURES_PAR_CATEGORIE } from "./src/lib/store.mjs";
+import { bootMessages as storeBootMessages, storageInfo, forMachine, listMachines, createMachine, setMachineLabel, deleteMachine, getSetting, setSetting, clearSetting, DEFAULT_MACHINE, createMcpToken, listMcpTokens, revokeMcpToken, findMcpTokenByHash, touchMcpTokenUse, hasScope, MCP_SCOPE_CATEGORIES, MCP_SCOPE_NATURES_PAR_CATEGORIE } from "./src/lib/store.mjs";
 // Identification du modele : la machine publie son numero de serie, et les 5 chiffres qui
 // indexent la table constructeur sont dedans. Aucun cloud — voir machine-models.mjs.
 import { MODELS, MODELS_TABLE_VERSION, SERIAL_PROP, findModel, identify as identifyModel } from "./src/lib/machine-models.mjs";
@@ -4742,7 +4742,7 @@ async function handleMcp(req, res) {
   touchMcpTokenUse(tokenRow.id);
 
   const server = new McpServer({ name: "delonghi-lan-server", version: "0.1.0" });
-  registerMcpTools(server, tokenRow); // défini en Task 6
+  registerMcpTools(server, tokenRow);
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => transport.close());
@@ -4752,8 +4752,32 @@ async function handleMcp(req, res) {
   await transport.handleRequest(req, res, body);
 }
 
+/**
+ * Point d'enregistrement UNIQUE d'un outil MCP. Un outil hors de la portée du jeton
+ * n'apparaît PAS dans `tools/list` (le SDK ne l'enregistre pas du tout pour cette
+ * connexion) — ce n'est pas un filtre d'affichage après coup, l'outil n'existe simplement
+ * pas pour ce jeton.
+ *
+ * `inputSchema` est la forme brute attendue par le SDK (`ZodRawShapeCompat` : un objet dont
+ * chaque propriété est un schéma Zod, PAS un `z.object(...)` déjà construit — c'est le SDK
+ * qui l'enveloppe). `run` reçoit les arguments déjà validés/parsés et renvoie une valeur JS
+ * ordinaire ; c'est cette fonction qui la met en forme `CallToolResult` (ou `isError`).
+ */
+function defineMcpTool(server, tokenRow, { name, categorie, nature, description, inputSchema, annotations = {}, run }) {
+  if (!hasScope(tokenRow, categorie, nature)) return;
+  server.registerTool(name, { description, inputSchema, annotations }, async (args) => {
+    try {
+      const result = await run(args);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    } catch (e) {
+      return { isError: true, content: [{ type: "text", text: e.message }] };
+    }
+  });
+}
+
 function registerMcpTools(_server, _tokenRow) {
-  // Catalogue ajouté en Task 6 — aucun outil pour l'instant, juste de quoi valider le transport.
+  // Les Tasks 7 à 10 ajoutent ici leurs appels à defineMcpTool — aucun outil pour l'instant,
+  // juste de quoi valider le transport et le filtrage de portée.
 }
 
 // --- API de contrôle ---
