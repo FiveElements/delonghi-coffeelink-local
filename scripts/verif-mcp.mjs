@@ -75,6 +75,22 @@ console.log(`OK: ${OUTILS_ATTENDUS.length} outils MCP attendus présents dans se
  *    valeur reçue = `0d0883f0010106c8b26aab65e8`. On compare donc un PRÉFIXE, jamais une égalité
  *    stricte — une égalité stricte ici serait le test qui se trompe, pas le produit.
  *
+ * ⚠️ **La preuve du chiffrement réel se lit dans la sortie de `fausse-machine.mjs`, jamais dans
+ * `/api/journal`.** Une relecture a montré que le `trame` du journal (`L("out", "commande",
+ * label, m, trame)`, server.mjs ~1369) est destructuré depuis `prochainePaquet(m)` et journalisé
+ * AVANT `m.session.encapsulate(data)` (server.mjs ~1370, la ligne juste en dessous) : c'est le
+ * CLAIR côté serveur, une comptabilité antérieure au chiffrement — pas une preuve de ce que
+ * l'appareil simulé a réellement déchiffré. Un mauvais sens de rôle dans `makeLanSession` ne lève
+ * aucune erreur (`src/lib/lansession.mjs` l.65-69 : « on obtient du déchiffrement qui produit des
+ * octets plausibles et illisibles ») — un test qui ne regarde que le journal serait vert même si
+ * le round-trip de chiffrement était cassé. La preuve qui compte est donc la ligne que
+ * `fausse-machine.mjs` imprime APRÈS avoir lui-même appelé `session.decapsulate(...)` : on capture
+ * son stdout (`stdio: ["ignore", "pipe", "ignore"]`, il n'écrit rien ailleurs), on vérifie qu'il
+ * n'a pas quitté en erreur, qu'il n'a pas loggé « commande illisible » (son propre `catch`), et
+ * que le texte déchiffré contient bien le base64 de la trame rendue par `start_beverage`. Le
+ * `trame` du journal reste vérifié en plus, comme corroboration côté serveur — mais seul le
+ * texte décrypté par le second processus prouve le chiffrement de bout en bout.
+ *
  * `scripts/fausse-machine.mjs` est repris tel quel (mêmes options que `verif-surfaces.mjs`,
  * `--cle` explicite plutôt qu'un `.env.local` qu'on ne veut pas dépendre) : aucune trame n'est
  * fabriquée à la main ici, ce serait vérifier le test.
@@ -139,13 +155,21 @@ const creerJeton = (name, scopes) => fetch(`${BASE}/api/mcp-tokens`, {
  * AES-256-CBC, tout est réel (`src/lib/lansession.mjs`, importé par `fausse-machine.mjs` comme
  * par `server.mjs`). On attend la fin du processus avant de continuer : c'est un enfant séparé,
  * sa visite doit être terminée avant qu'on ne lise le journal ou qu'on n'en relance une seconde.
+ *
+ * Le stdout est CAPTURÉ, pas ignoré : c'est la ligne que `fausse-machine.mjs` imprime après avoir
+ * lui-même déchiffré (`← commande du serveur : …`, ou `← commande illisible (…)` si le round-trip
+ * de chiffrement échoue) qui constitue la preuve — voir l'avertissement en tête de fichier. Rendre
+ * aussi le code de sortie : un script qui plante avant d'avoir rien imprimé ne doit pas se lire
+ * comme une absence de commande.
  */
 function visiterCommeAppareil() {
   return new Promise((resolve, reject) => {
     const p = spawn(process.execPath, [
       join(RACINE_DEPOT, "scripts", "fausse-machine.mjs"), "--serveur", `127.0.0.1:${PORT}`, "--cle", CLE_LAN,
-    ], { cwd: RACINE_DEPOT, stdio: "ignore" });
-    p.on("exit", resolve);
+    ], { cwd: RACINE_DEPOT, stdio: ["ignore", "pipe", "ignore"] });
+    let sortie = "";
+    p.stdout.on("data", (d) => { sortie += d; });
+    p.on("exit", (code) => resolve({ code, sortie }));
     p.on("error", reject);
   });
 }
@@ -191,22 +215,48 @@ try {
   if (!/^[0-9a-f]+$/.test(frameAttendue)) throw new Error(`frameHex absent ou illisible dans la réponse MCP : ${JSON.stringify(rendu)}`);
 
   // Premier passage : la poignée de main (device_connected) — voir l'écart n°2. La sauter, ce
-  // serait comparer contre la mauvaise trame et ne jamais s'en apercevoir.
-  await visiterCommeAppareil();
+  // serait comparer contre la mauvaise trame et ne jamais s'en apercevoir. On exige quand même un
+  // déchiffrement réussi ici : un round-trip cassé dès la poignée de main doit arrêter le test
+  // avant même d'atteindre la vraie commande, pas se découvrir après coup sur un message confus.
+  const passage1 = await visiterCommeAppareil();
+  if (passage1.code !== 0) throw new Error(`fausse-machine.mjs (1er passage) a quitté avec le code ${passage1.code} :\n${passage1.sortie}`);
+  if (!passage1.sortie.includes("commande du serveur")) {
+    throw new Error(`fausse-machine.mjs (1er passage) n'a déchiffré aucune commande (poignée de main attendue) :\n${passage1.sortie}`);
+  }
+
   // Second passage : la file n'est plus vide, ce n'est ni la première visite ni un multiple de
   // cinq — c'est ici que la vraie trame ECAM part vers l'« appareil ».
-  await visiterCommeAppareil();
+  const passage2 = await visiterCommeAppareil();
+  if (passage2.code !== 0) throw new Error(`fausse-machine.mjs (2e passage) a quitté avec le code ${passage2.code} :\n${passage2.sortie}`);
+  const ligneDechiffree = passage2.sortie.split("\n").find((l) => l.includes("commande du serveur") || l.includes("commande illisible"));
+  if (!ligneDechiffree) throw new Error(`fausse-machine.mjs (2e passage) n'a rien reçu à déchiffrer :\n${passage2.sortie}`);
+  if (ligneDechiffree.includes("illisible")) throw new Error(`fausse-machine.mjs n'a pas pu déchiffrer la commande — round-trip de chiffrement cassé : ${ligneDechiffree.trim()}`);
+  // **La preuve du chiffrement réel.** `base64Attendu` est le codage de la trame EXACTE rendue par
+  // `start_beverage` (`frameAttendue`, 9 octets pour ce dispense — un multiple de 3, donc son
+  // base64 ne prend pas de remplissage `=` et reste un préfixe stable même quand
+  // `datapointValue()` ajoute 4 octets d'horodatage derrière avant d'encoder l'ensemble — voir
+  // l'écart n°3). Si ce texte apparaît dans ce que `fausse-machine.mjs` a lui-même déchiffré avec
+  // SA propre session (clés dérivées indépendamment, côté « device »), alors la clé LAN, la
+  // dérivation, le sens des rôles et le round-trip AES-256-CBC + HMAC sont tous réellement
+  // corrects — pas seulement ce que le serveur a écrit dans son propre journal avant de chiffrer.
+  const base64Attendu = Buffer.from(frameAttendue, "hex").toString("base64");
+  if (!ligneDechiffree.includes(base64Attendu)) {
+    throw new Error(`la commande déchiffrée par fausse-machine.mjs ne contient pas la trame attendue (${base64Attendu}) : ${ligneDechiffree.trim()}`);
+  }
 
+  // Corroboration côté serveur : le CLAIR journalisé avant chiffrement (voir l'avertissement en
+  // tête de fichier) doit lui aussi commencer par la même trame — sinon c'est le serveur qui aurait
+  // servi autre chose que ce qu'il a construit, un défaut différent de celui que la preuve
+  // ci-dessus couvre.
   const journal = await fetch(`${BASE}/api/journal`).then((r) => r.json());
   const ligneCommande = [...journal.lignes].reverse().find((l) => l.sujet === "commande" && l.trame);
   if (!ligneCommande) throw new Error("aucune commande à trame n'est parvenue au journal après deux visites de fausse-machine.mjs");
-  const trameRecue = Buffer.from(ligneCommande.trame, "base64").toString("hex");
-  // Voir l'écart n°3 : préfixe, pas égalité — `datapointValue()` ajoute un horodatage derrière.
-  if (!trameRecue.startsWith(frameAttendue)) {
-    throw new Error(`la trame reçue par l'appareil (${trameRecue}) ne commence pas par celle rendue par start_beverage (${frameAttendue})`);
+  const trameJournal = Buffer.from(ligneCommande.trame, "base64").toString("hex");
+  if (!trameJournal.startsWith(frameAttendue)) {
+    throw new Error(`la trame journalisée par le serveur (${trameJournal}) ne commence pas par celle rendue par start_beverage (${frameAttendue})`);
   }
 
-  console.log("OK: authentification, portée par jeton et start_beverage bout-en-bout");
+  console.log("OK: authentification, portée par jeton et start_beverage bout-en-bout, round-trip de chiffrement vérifié côté appareil");
 } finally {
   srv.kill();
   // SQLite garde le fichier ouvert un instant après la mort du processus, et Windows refuse alors
