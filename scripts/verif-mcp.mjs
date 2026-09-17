@@ -174,8 +174,17 @@ function visiterCommeAppareil() {
   });
 }
 
+// `MACHINE_IP` et `SERVER_IP` : les deux mêmes préconditions que le préambule de `handleApi`
+// (voir `resolveMachineForAction`, server.mjs) — sans elles, `start_beverage` échoue maintenant
+// EXACTEMENT comme `POST /api/command` échouerait sur une machine mal configurée, ce que ce test
+// n'a plus le droit d'ignorer. `MACHINE_IP=127.0.0.1` satisfait le seul contrôle de présence :
+// rien n'écoute sur son port 80 ici, `resolveDsn` échoue vite (connexion refusée, pas un délai de
+// 4 s) et sans DSN connu, exactement comme avant cette adresse. `SERVER_IP` doit seulement ne pas
+// être une adresse de boucle locale (`serverIpProblem`) — 192.0.2.1 (TEST-NET-1, RFC 5737) n'est
+// jamais routable, donc jamais confondue avec une vraie adresse d'hôte ; `fausse-machine.mjs` ne
+// la lit pas, il vise `--serveur 127.0.0.1:$PORT` en direct.
 const srv = spawn(process.execPath, ["server.mjs"], {
-  env: { ...process.env, DATA_DIR: DIR, SERVER_PORT: String(PORT), LANIP_KEY: CLE_LAN },
+  env: { ...process.env, DATA_DIR: DIR, SERVER_PORT: String(PORT), LANIP_KEY: CLE_LAN, MACHINE_IP: "127.0.0.1", SERVER_IP: "192.0.2.1" },
   stdio: "ignore",
 });
 

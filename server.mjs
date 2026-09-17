@@ -531,6 +531,34 @@ async function resolveMachineForTool(machineId) {
   return m;
 }
 
+/**
+ * Résolution de machine pour un outil MCP qui envoie une VRAIE commande — variante de
+ * `resolveMachineForTool` qui rejoue en plus les trois préconditions du préambule de `handleApi`
+ * (voir § *handleApi*, juste avant `NEEDS_MACHINE`) : adresse configurée, clé LAN non vide,
+ * `SERVER_IP` joignable depuis le réseau de la machine.
+ *
+ * Sans ceci, un outil d'action passait par `resolveMachineForTool` seul et rendait un
+ * `CallToolResult` sans erreur — programme construit, tâche mise en file — pour une commande qui
+ * n'atteindrait jamais la machine, exactement le succès trompeur que ce garde-fou existe pour
+ * empêcher côté HTTP. `run()` laisse l'exception remonter : `defineMcpTool` la traduit en
+ * `isError: true` avec le même message, donc un client MCP voit exactement ce que verrait
+ * `POST /api/command` sur la même machine mal configurée.
+ */
+async function resolveMachineForAction(machineId) {
+  const m = await resolveMachineForTool(machineId);
+  if (!m.ip) {
+    throw new Error("adresse de la machine non configurée : la renseigner sur la page « Machines », ou par MACHINE_IP dans .env.local.");
+  }
+  if (!m.lanKey.length) {
+    throw new Error("clé LAN absente : aucune session chiffrée n'est possible, la commande n'atteindrait jamais la machine. Renseigner LANIP_KEY dans .env.local, ou récupérer la clé depuis la page « Machines ».");
+  }
+  const problemeIp = serverIpProblem();
+  if (problemeIp) {
+    throw new Error(`${problemeIp} : c'est l'adresse que nous annonçons à la machine pour qu'elle nous rappelle. En mode LAN, c'est ELLE qui se connecte à nous — avec cette valeur, la commande serait acceptée puis perdue. Renseigner SERVER_IP avec une adresse joignable depuis le réseau de la machine (voir DOCKER.md § 1).`);
+  }
+  return m;
+}
+
 /** Adresse source de la requête, débarrassée du préfixe IPv4-mappé d'IPv6. */
 const peerAddress = (req) => String(req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
 
@@ -5306,7 +5334,7 @@ function registerMcpTools(server, tokenRow) {
       params: z.array(z.object({ id: z.number(), value: z.number() })).optional(),
     },
     run: async ({ machine, ...args } = {}) => {
-      const m = await resolveMachineForTool(machine);
+      const m = await resolveMachineForAction(machine);
       return executeDispense(m, args);
     },
   });
@@ -5341,7 +5369,7 @@ function registerMcpTools(server, tokenRow) {
       machine: z.string().optional(),
     },
     run: async ({ machine, profileId, name, kind, icon } = {}) => {
-      const m = await resolveMachineForTool(machine);
+      const m = await resolveMachineForAction(machine);
       return renameProfile(m, { index: profileId, name, kind, icon });
     },
   });
@@ -5360,7 +5388,7 @@ function registerMcpTools(server, tokenRow) {
     annotations: { destructiveHint: true },
     inputSchema: { profileId: z.number().optional(), beverageIds: z.array(z.number()), machine: z.string().optional() },
     run: async ({ machine, ...data } = {}) => {
-      const m = await resolveMachineForTool(machine);
+      const m = await resolveMachineForAction(machine);
       return setFavoriteProfile(m, data);
     },
   });
@@ -5412,7 +5440,7 @@ function registerMcpTools(server, tokenRow) {
     annotations: { destructiveHint: true },
     inputSchema: { machine: z.string().optional(), from: z.number().optional(), to: z.number().optional() },
     run: async ({ machine, from, to } = {}) => {
-      const m = await resolveMachineForTool(machine);
+      const m = await resolveMachineForAction(machine);
       return beanAdaptScan(m, from ?? 0, to ?? 5);
     },
   });
@@ -5423,7 +5451,7 @@ function registerMcpTools(server, tokenRow) {
     annotations: { destructiveHint: true },
     inputSchema: { machine: z.string().optional(), index: z.number(), grinder: z.number(), temperature: z.number(), aroma: z.number(), name: z.string().optional(), visible: z.boolean().optional() },
     run: async ({ machine, ...args } = {}) => {
-      const m = await resolveMachineForTool(machine);
+      const m = await resolveMachineForAction(machine);
       return beanAdaptSave(m, args);
     },
   });
@@ -5453,7 +5481,7 @@ function registerMcpTools(server, tokenRow) {
     annotations: { destructiveHint: true },
     inputSchema: { cle: z.string(), value: z.number().optional(), on: z.boolean().optional(), machine: z.string().optional() },
     run: async ({ machine, ...data } = {}) => {
-      const m = await resolveMachineForTool(machine);
+      const m = await resolveMachineForAction(machine);
       return writeSettings(m, data);
     },
   });

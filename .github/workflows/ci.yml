@@ -246,7 +246,7 @@ jobs:
 
       # Les migrations de schéma sont la seule opération capable de détruire les données d'un
       # utilisateur : on les joue sur des bases fabriquées ici, plutôt que de les découvrir chez lui.
-      # Une base v1 doit traverser TOUTE la chaîne (v1 → v2 → v3) en un démarrage.
+      # Une base v1 doit traverser TOUTE la chaîne (v1 → v2 → v3 → v4) en un démarrage.
       - name: Vérifier la chaîne de migrations de schéma
         run: |
           mkdir -p /tmp/ci-v1
@@ -271,7 +271,7 @@ jobs:
           DATA_DIR=/tmp/ci-v1 node --input-type=module -e "
             const S = await import('./src/lib/store.mjs');
             const info = S.storageInfo();
-            if (info.schemaVersion !== 3) throw new Error('schema v3 attendu, obtenu v' + info.schemaVersion);
+            if (info.schemaVersion !== 4) throw new Error('schema v4 attendu, obtenu v' + info.schemaVersion);
             if (info.machines !== 1) throw new Error('une machine attendue, obtenu ' + info.machines);
             const st = S.forMachine(S.DEFAULT_MACHINE);
             const c = st.counts();
@@ -281,8 +281,10 @@ jobs:
             if (st.getMeta('dsn') === null) throw new Error('la table meta n a pas ete reprise');
             if (!S.bootMessages.some((x) => x.includes('v1 → v2'))) throw new Error('le pas v1 → v2 ne s est pas annonce');
             if (!S.bootMessages.some((x) => x.includes('v2 → v3'))) throw new Error('le pas v2 → v3 ne s est pas annonce');
+            if (!S.bootMessages.some((x) => x.includes('v3 → v4'))) throw new Error('le pas v3 → v4 ne s est pas annonce');
             if (c.beanImages !== 0) throw new Error('table des images absente apres migration');
-            console.log('chaine v1 → v2 → v3 OK :', JSON.stringify(c));
+            if (S.listMcpTokens().length !== 0) throw new Error('table des jetons MCP absente apres migration');
+            console.log('chaine v1 → v2 → v3 → v4 OK :', JSON.stringify(c));
           "
           # Deuxième démarrage : la migration ne doit pas rejouer.
           DATA_DIR=/tmp/ci-v1 node --input-type=module -e "
@@ -290,7 +292,7 @@ jobs:
             if (S.bootMessages.length) throw new Error('la migration a rejoue : ' + S.bootMessages.join(' | '));
             console.log('deuxieme demarrage : aucune remigration');
           "
-          # Le pas v2 → v3 joué SEUL, sur une base v2 qui porte déjà des données : c'est le cas
+          # Les pas v2 → v3 → v4 joués sur une base v2 qui porte déjà des données : c'est le cas
           # réel des installations existantes, que la chaîne complète ci-dessus n'exerce pas.
           mkdir -p /tmp/ci-v2
           node --input-type=module -e "
@@ -314,7 +316,7 @@ jobs:
           DATA_DIR=/tmp/ci-v2 node --input-type=module -e "
             const S = await import('./src/lib/store.mjs');
             const info = S.storageInfo();
-            if (info.schemaVersion !== 3) throw new Error('schema v3 attendu, obtenu v' + info.schemaVersion);
+            if (info.schemaVersion !== 4) throw new Error('schema v4 attendu, obtenu v' + info.schemaVersion);
             const st = S.forMachine('m1');
             if (st.counts().stats !== 1) throw new Error('donnees perdues au pas v2 → v3');
             if (st.getMeta('beanPresets') === null) throw new Error('meta perdue au pas v2 → v3');
@@ -322,7 +324,8 @@ jobs:
             const img = st.getBeanImage('b1');
             if (!img || img.mime !== 'image/webp' || img.bytes.length !== 3) throw new Error('la table des images ne fonctionne pas');
             if (st.getBeanImage('b404') !== null) throw new Error('une image absente doit rendre null');
-            console.log('pas v2 → v3 OK');
+            if (S.listMcpTokens().length !== 0) throw new Error('table des jetons MCP absente apres migration');
+            console.log('pas v2 → v3 → v4 OK');
           "
 
   docker:
