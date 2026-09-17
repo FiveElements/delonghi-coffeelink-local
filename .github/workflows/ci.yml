@@ -194,6 +194,9 @@ jobs:
       - name: Vérifier le reniflage d'une photo de grain
         run: node scripts/verif-datum-grains.mjs
 
+      - name: Vérifier le serveur MCP (catalogue, authentification, portée)
+        run: node scripts/verif-mcp.mjs
+
       - name: Build
         run: pnpm build
         env:
