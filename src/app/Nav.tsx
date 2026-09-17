@@ -53,6 +53,9 @@ const ENTRIES = [
   { href: "/reglages", key: "settings", needsMachine: true },
   { href: "/machines", key: "machines", needsMachine: false },
   { href: "/systeme", key: "system", needsMachine: false },
+  // Jetons d'API MCP : globaux comme /machines et /systeme — un jeton n'appartient à aucune
+  // machine, donc rien ici n'exige l'adresse ni la clé LAN de celle qui est sélectionnée.
+  { href: "/mcp-tokens", key: "mcpTokens", needsMachine: false },
 ] as const;
 
 interface Entree {

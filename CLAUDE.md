@@ -53,6 +53,7 @@ node scripts/verif-images.mjs      # both artwork fingerprint chains — beverag
 node scripts/verif-datum-grains.mjs # sniffing a bean photo pulled from the Ayla datum (type from bytes, not from a claim)
 node scripts/verif-bean-adapt.mjs  # BOTH Bean Adapt rules, each against a recorded matrix: refine on 9 cells, create on all 8
 node scripts/verif-surfaces.mjs    # the 12 surfaces in a REAL headless Chrome (see § Styling)
+node scripts/verif-mcp.mjs         # MCP server: catalog drift, token auth/scope enforcement, a real start_beverage round-trip through fausse-machine.mjs
 ```
 
 These exist because the modules they cover are **pure**, and the errors they catch are the silent
@@ -204,8 +205,9 @@ true of the range.
 ### Storage
 
 One SQLite file (`data/lan-server.db`; `DATA_DIR` / `DATABASE_FILE`), WAL + `synchronous = FULL` +
-`STRICT` tables. Each received property is one upserted row, not a rewritten 80 kB blob. Schema v3;
-migrations run automatically at boot and announce themselves through `bootMessages`. Every data
+`STRICT` tables. Each received property is one upserted row, not a rewritten 80 kB blob. Schema v4
+(v3 → v4 added `mcp_tokens`, for MCP API tokens); migrations run automatically at boot and announce
+themselves through `bootMessages`. Every data
 table carries a `machine` column with `ON DELETE CASCADE`; machine-independent settings live in
 their own `settings` table.
 
@@ -304,6 +306,21 @@ so several apps can share the machine's **single** `local_reg` slot (an official
 evicts us with no error and no signal at all). It is opt-in because impersonating a device is an
 explicit act, not a side effect of an upgrade. Apps build URLs as `http://<ip>/` with no port, so
 they only ever look on **port 80** — listen there or redirect, otherwise nothing arrives.
+
+### MCP server
+
+`/mcp` (Streamable HTTP) exposes the same control API as an MCP tool catalog. The tools live in
+`server.mjs` itself, next to `handleApi` — not a separate `src/lib/mcp-tools.mjs` — because each
+tool closes over the same module-level mutable state (`MACHINES`, the scheduler, `CFG`) that
+`handleApi` already closes over; splitting them into a pure module would mean passing all of that
+back in, for no isolation actually gained. An action tool must refuse exactly when the HTTP route it
+wraps would refuse — see `resolveMachineForAction`, next to `resolveMachineForTool` — never a
+misleading success for a command that will never reach the machine.
+
+⚠️ **The token system is a *scoping* mechanism, not a network boundary.** `/api/mcp-tokens` is
+itself unauthenticated, like the rest of `/api/*`: anyone who can reach the server can mint their
+own all-scopes token, or skip tokens entirely and call `/api/command` directly. What a token buys is
+narrowing what an *already-trusted* agent is allowed to do — never keeping an untrusted caller out.
 
 ## Front-end conventions
 

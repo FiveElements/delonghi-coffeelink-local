@@ -168,6 +168,30 @@ dépôt.
 - **Catalogue de boissons** : statique, par modèle, extrait des ressources de l'application. La
   machine ne dit jamais quelles boissons elle sait faire — elle ne fournit que des valeurs.
 
+## MCP
+
+Le serveur expose aussi `/mcp` : un point d'entrée [MCP](https://modelcontextprotocol.io/) (Streamable
+HTTP) qui reprend la même API de contrôle sous forme de catalogue d'outils, pour piloter la machine
+depuis un agent ou un client compatible MCP plutôt que par des requêtes HTTP écrites à la main.
+Chaque outil a une catégorie (`statut`, `journal`, `boissons`, `profils`, `grains`, `recettes`,
+`reglages`) et une nature (`lecture` ou `action`) ; un outil d'ACTION envoie une vraie commande à la
+machine et se refuse, exactement comme la route HTTP qu'il enveloppe, tant que l'adresse de la
+machine, la clé LAN ou `SERVER_IP` ne sont pas correctement configurées — jamais un succès de façade
+pour une commande qui n'atteindrait jamais l'appareil.
+
+Un jeton s'obtient sur la page **Jetons MCP** (`/mcp-tokens`) : on lui donne un nom et on coche les
+portées (catégorie + nature) qu'il doit couvrir — rien n'est coché par défaut, un jeton créé sans
+case cochée ne peut lire que le statut de base. Le jeton en clair n'est montré qu'une fois, à la
+création : le serveur ne conserve que son hachage.
+
+⚠️ **Le fait à connaître avant d'exposer `/mcp` où que ce soit : `/api/mcp-tokens` lui-même n'est
+pas authentifié**, comme le reste de `/api/*`. Le système de jetons est un mécanisme de **portée** —
+ce qu'un agent qui a déjà un jeton a le droit de faire — pas un périmètre réseau. Quiconque atteint
+le serveur peut se fabriquer son propre jeton avec toutes les portées, ou se passer de jeton et
+appeler directement `/api/command`. La protection réelle est celle de la section
+[Sécurité](#sécurité) ci-dessous : ne pas exposer ce serveur sur Internet, et le tenir derrière un
+VPN pour un accès distant.
+
 ## Sécurité
 
 ### Ce que cette machine est, du point de vue du réseau
