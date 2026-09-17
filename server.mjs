@@ -57,6 +57,10 @@ import { MODELS, MODELS_TABLE_VERSION, SERIAL_PROP, findModel, identify as ident
 // /mcp. `McpServer` construit un serveur SANS transport ; `connect()` l'attache à CETTE requête.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+// `inputSchema` (voir `defineMcpTool`) attend un schéma Zod par propriété : c'est le SDK MCP qui
+// choisit Zod, pas ce dépôt — `zod` était jusqu'ici une transitive du SDK, ajoutée en directe pour
+// ne pas dépendre d'un hasard de hoisting pnpm.
+import { z } from "zod";
 
 // --- .env.local ---
 try {
@@ -4348,6 +4352,19 @@ function journalDepuis(depuis) {
 /** La fenêtre entière, les deux bacs mêlés, du plus ancien au plus récent. */
 const journalComplet = () => [...LOG, ...LOG_APPS].sort((a, b) => a.n - b.n);
 
+/**
+ * Le journal hors flux, tel que le rend `GET /api/journal` — et maintenant aussi l'outil MCP
+ * `get_journal` : ni l'un ni l'autre ne construit sa propre notion de « rattrapage possible ».
+ *
+ * `depuis` rend la même chose que le fil (`cadreJournal`) : au-delà de la dernière ligne évincée,
+ * le rattrapage ; en deçà, ou absent (0), la fenêtre entière marquée `complet`.
+ */
+function buildJournalPayload(depuis) {
+  const rattrape = Number.isFinite(depuis) && depuis > 0 && depuis >= journalEvince;
+  const lignes = rattrape ? journalDepuis(depuis) : journalComplet();
+  return { lignes, complet: !rattrape, jusqu: lignes.length ? lignes[lignes.length - 1].n : journalSeq };
+}
+
 function sseEcrire(res, cadre) {
   try { res.write(cadre); } catch { SSE.delete(res); }
 }
@@ -4763,7 +4780,6 @@ async function handleMcp(req, res) {
  * qui l'enveloppe). `run` reçoit les arguments déjà validés/parsés et renvoie une valeur JS
  * ordinaire ; c'est cette fonction qui la met en forme `CallToolResult` (ou `isError`).
  */
-// eslint-disable-next-line no-unused-vars -- defineMcpTool a son premier appelant en Task 7 (registerMcpTools reste vide jusque-là)
 function defineMcpTool(server, tokenRow, { name, categorie, nature, description, inputSchema, annotations = {}, run }) {
   if (!hasScope(tokenRow, categorie, nature)) return;
   server.registerTool(name, { description, inputSchema, annotations }, async (args) => {
@@ -4776,9 +4792,214 @@ function defineMcpTool(server, tokenRow, { name, categorie, nature, description,
   });
 }
 
-function registerMcpTools(_server, _tokenRow) {
-  // Les Tasks 7 à 10 ajoutent ici leurs appels à defineMcpTool — aucun outil pour l'instant,
-  // juste de quoi valider le transport et le filtrage de portée.
+/**
+ * Le corps exact de `GET /api/status`, extrait pour avoir un seul endroit qui le construit — la
+ * route HTTP et l'outil MCP `get_status` appellent tous les deux CETTE fonction.
+ */
+function buildStatusPayload(m) {
+  return {
+    // De quelle machine parle cette réponse, et quelles autres existent. Toutes les pages
+    // interrogent /api/status : c'est donc ici que le sélecteur de machine trouve sa liste,
+    // sans requête supplémentaire.
+    machine: { id: m.id, label: machineLabel(m), custom: m.label },
+    machines: machineList().map((x) => ({ id: x.id, label: machineLabel(x), current: x.id === m.id })),
+    config: { dsn: m.dsn, dsnSource: m.dsnSource, machineIp: m.ip, machineIpSource: m.ipSource, serverIp: CFG.serverIp, serverIpSource: CFG.serverIpSource, serverIpProblem: serverIpProblem(), serverPort: CFG.port, generation: m.gen, lanKeyId: m.lanKeyId, lanKeySet: m.lanKey.length > 0, lanKeySource: m.lanKeySource },
+    // Volontairement léger : /api/status est interrogé toutes les 3 s. La fiche complète du
+    // modèle est sur /api/model.
+    model: { key: m.modelKey, source: m.modelSource, catalogKey: m.catalog.key, catalogType: m.catalog.model.type, matchesCatalog: m.modelKey ? m.modelKey === m.catalog.key : null },
+    /**
+     * **`lastContactAt` : la seule mesure honnête de la liaison.** `active` est un VERROU — il
+     * passe à vrai au premier échange de clés et n'est remis à zéro que par un changement de
+     * configuration (clé, adresse, réinitialisation), jamais par une inactivité ni un délai. Il
+     * affiche donc « établie » des heures après que la machine a cessé de répondre, ce qui est
+     * exactement la situation qu'on vient diagnostiquer sur `/pilotage`. `file.dernierContact`
+     * est daté par CHAQUE datapaquet reçu (`contactMachine` dans `handleProperty`), donc il dit
+     * « elle nous parle encore » et non « elle nous a parlé un jour ». 0 = jamais.
+     */
+    session: { active: !!m.session, lastContactAt: m.file.dernierContact || null }, lastRegisterAt: m.lastRegisterAt, activeProfile: m.activeProfile, activeProfileConfirmed: m.activeProfileConfirmed,
+    /**
+     * `queue` — la file de tâches, et les vues dérivées que les autres pages lisent encore.
+     * Voir `machineActivity()`. Il n'y a plus qu'un seul état pour « ce que fait la machine »,
+     * donc plus de page qui en affirme une chose pendant qu'une autre affirme le contraire.
+     */
+    ...machineActivity(m),
+    lastMonitor: m.lastMonitor, lastDataResponse: m.lastDataResponse,
+    /**
+     * ⚠️ **Le journal n'est plus ici, et c'est le point du lot.** Mesuré sur la machine d'essai :
+     * cette réponse pesait 8 185 octets dont 5 685 (69 %) de journal — 50 lignes retéléchargées
+     * en entier à chaque poussée SSE, soit toutes les 250 ms pendant une préparation, pour
+     * ~114 octets d'information neuve. Il voyage désormais en ajouts sur le fil
+     * (`cadreJournal`), et s'amorce par `GET /api/journal`.
+     */
+  };
+}
+
+/**
+ * Le corps exact de `GET /api/system`, extrait pour la même raison que `buildStatusPayload` — la
+ * route HTTP et l'outil MCP `get_system` appellent tous les deux CETTE fonction. Reste `async` :
+ * `probeRegtoken` sonde réellement la machine.
+ */
+async function buildSystemPayload(m) {
+  const store = m.store.machineView();
+  // Sondes indépendantes : en série, la page cumulait les délais d'attente (4 s + 8 s).
+  const live = await probeRegtoken(m);
+  const cloud = cloudOtaState(m);
+  return {
+    deviceSheet: DEVICE_SHEET,
+    // Fiche du catalogue EN SERVICE, sans la liste des recettes : elle fait 28 entrées ici et 48
+    // sur une Striker, personne ne les lit dans cette réponse, et /api/beverages les sert déjà.
+    model: {
+      ...modelSheet(m.catalog.key),
+      nBeverages: m.catalog.beverages.length,
+      /** Vrai si ce catalogue n'est pas celui du modèle détecté, mais un remplaçant. */
+      fallback: m.catalog.fallback,
+      detectedKey: m.modelKey,
+    },
+    identification: modelState(m),
+    network: {
+      machineIp: m.ip,
+      serverIp: CFG.serverIp,
+      serverPort: CFG.port,
+      generation: m.gen,
+      dsn: m.dsn,
+      dsnSource: m.dsnSource,
+      note: "La machine est sur un VLAN IoT isolé ; le LAN mode exige que machine → serveur soit permis.",
+    },
+    local: live,
+    protocol: {
+      lanKeyId: m.lanKeyId,
+      lanKeySet: m.lanKey.length > 0,
+      lanKeySource: m.lanKeySource,
+      sessionActive: !!m.session,
+      lastRegisterAt: m.lastRegisterAt,
+      keepaliveMs: 2500,
+      sendProperty: m.send,
+      monitorProperty: m.mon,
+      crypto: "AES-256-CBC en flux persistant, clés dérivées par double HMAC-SHA256",
+      activeProfile: m.activeProfile,
+      activeProfileConfirmed: m.activeProfileConfirmed,
+    },
+    ota: {
+      lanRequests: m.otaRequests,
+      lanNote: "En mode LAN, c'est la machine qui vient chercher l'image chez nous : aucune requête reçue signifie qu'aucun OTA n'est distribué par ce serveur.",
+      cloud,
+    },
+    // Le stockage fait partie de la fiche technique : savoir quel moteur tourne, dans quelle
+    // version de schéma et avec combien de lignes évite d'ouvrir le fichier pour le vérifier.
+    storage: storageInfo(),
+    machineState: {
+      lastMonitor: m.lastMonitor,
+      lastDataResponse: m.lastDataResponse,
+      checksums: store.checksums ?? null,
+      serialNumber: store.props?.d270_serialnumber ?? null,
+      propsRead: Object.keys(store.props ?? {}).length,
+      importedAt: store.importedAt ?? null,
+    },
+  };
+}
+
+/**
+ * Le corps exact de `GET /api/stats`, même règle : `handleApi` et l'outil MCP `get_stats`
+ * appellent tous les deux CETTE fonction, jamais une seconde construction du même objet.
+ */
+function buildStatsPayload(m) {
+  const store = m.store.machineView();
+  const stats = store.stats ?? {};
+  return {
+    // Identifiant brut → valeur. La signification de chaque id n'est PAS établie : l'app les
+    // demande sans les nommer, il n'existe aucune table de correspondance dans l'APK.
+    stats: Object.fromEntries(Object.entries(stats).map(([id, v]) => [id, v.value])),
+    readAt: Object.fromEntries(Object.entries(stats).map(([id, v]) => [id, v.at])),
+    count: Object.keys(stats).length,
+    scan: machineActivity(m).statScan,
+    // Ce que l'app demande (p258z7/w.java et le viewmodel des statistiques).
+    appIds: APP_STAT_IDS,
+    // Publiées plutôt que recopiées dans la page : voir STAT_RANGES.
+    ranges: STAT_RANGES,
+    /**
+     * Le second canal : des compteurs NOMMÉS, portés par des propriétés Ayla (`compteurs.mjs`).
+     * `named` ne liste que ce qui a été lu au moins une fois ; `namedScopes` dit ce qu'il y a à
+     * demander, pour que les deux boutons sachent leur étendue sans recopier la table côté page —
+     * même raison que `ranges` juste au-dessus.
+     */
+    named: vueCompteurs(m),
+    namedScopes: Object.fromEntries(Object.entries(PORTEES_COMPTEURS).map(([k, v]) => [k, v.length])),
+    // Le second espace de paramètres (`0xA1`, mots du paramètre 500) — voir SYNC_MEANINGS. Il
+    // vient de la propriété déjà en cache : cet endpoint ne demande jamais rien à la machine.
+    sync: vueParamsSync(m),
+    // Les seuls dont la signification est établie. `raw` reste la valeur brute ; `value` est
+    // convertie quand il y a une unité (eau : 0,5 ml → litres).
+    known: Object.entries(STAT_MEANINGS)
+      .filter(([id]) => stats[id] !== undefined)
+      .map(([id, sens]) => ({
+        id: Number(id),
+        key: sens.key,
+        raw: stats[id].value,
+        value: sens.divisor ? Math.round(stats[id].value / sens.divisor) : stats[id].value,
+        unit: sens.divisor ? "L" : null,
+        at: stats[id].at,
+      })),
+  };
+}
+
+function registerMcpTools(server, tokenRow) {
+  defineMcpTool(server, tokenRow, {
+    name: "get_status", categorie: "statut", nature: "lecture",
+    description: "État courant de la machine (statut d'un coup d'œil).",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => {
+      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
+      if (!m) throw new Error(error);
+      return buildStatusPayload(m);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "list_machines", categorie: "statut", nature: "lecture",
+    description: "Liste des machines connues du serveur, avec leur identifiant (mN) et leur adresse.",
+    inputSchema: {},
+    run: async () => ({ machines: machineList().map(machineSummary) }),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "get_machine", categorie: "statut", nature: "lecture",
+    description: "Fiche d'une machine précise (adresse, DSN, clé LAN présente ou non).",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => {
+      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
+      if (!m) throw new Error(error);
+      return machineSummary(m);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "get_system", categorie: "statut", nature: "lecture",
+    description: "Propriétés système Ayla de la machine.",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => {
+      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
+      if (!m) throw new Error(error);
+      return buildSystemPayload(m);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "get_stats", categorie: "statut", nature: "lecture",
+    description: "Compteurs et statistiques brutes de la machine (paramètres 0xA2 0x0F et propriétés nommées).",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => {
+      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
+      if (!m) throw new Error(error);
+      return buildStatsPayload(m);
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "get_journal", categorie: "journal", nature: "lecture",
+    description: "Fenêtre du journal (déjà survenu, jamais un flux) — utiliser `depuis` pour ne récupérer que la suite d'une lecture précédente.",
+    inputSchema: { depuis: z.number().optional() },
+    run: async ({ depuis } = {}) => buildJournalPayload(depuis ?? 0),
+  });
 }
 
 // --- API de contrôle ---
@@ -4801,9 +5022,7 @@ async function handleApi(req, res) {
    */
   if (url.split("?")[0] === "/api/journal" && req.method === "GET") {
     const depuis = Number(new URL(req.url, "http://x").searchParams.get("depuis"));
-    const rattrape = Number.isFinite(depuis) && depuis > 0 && depuis >= journalEvince;
-    const lignes = rattrape ? journalDepuis(depuis) : journalComplet();
-    return raw(res, JSON.stringify({ lignes, complet: !rattrape, jusqu: lignes.length ? lignes[lignes.length - 1].n : journalSeq }));
+    return raw(res, JSON.stringify(buildJournalPayload(depuis)));
   }
   /**
    * Le vidage, et il NOMME sa cible. `source` est obligatoire et sans valeur par défaut : les deux
@@ -4906,41 +5125,7 @@ async function handleApi(req, res) {
     }
   }
   if (url === "/api/status") {
-    return raw(res, JSON.stringify({
-      // De quelle machine parle cette réponse, et quelles autres existent. Toutes les pages
-      // interrogent /api/status : c'est donc ici que le sélecteur de machine trouve sa liste,
-      // sans requête supplémentaire.
-      machine: { id: m.id, label: machineLabel(m), custom: m.label },
-      machines: machineList().map((x) => ({ id: x.id, label: machineLabel(x), current: x.id === m.id })),
-      config: { dsn: m.dsn, dsnSource: m.dsnSource, machineIp: m.ip, machineIpSource: m.ipSource, serverIp: CFG.serverIp, serverIpSource: CFG.serverIpSource, serverIpProblem: serverIpProblem(), serverPort: CFG.port, generation: m.gen, lanKeyId: m.lanKeyId, lanKeySet: m.lanKey.length > 0, lanKeySource: m.lanKeySource },
-      // Volontairement léger : /api/status est interrogé toutes les 3 s. La fiche complète du
-      // modèle est sur /api/model.
-      model: { key: m.modelKey, source: m.modelSource, catalogKey: m.catalog.key, catalogType: m.catalog.model.type, matchesCatalog: m.modelKey ? m.modelKey === m.catalog.key : null },
-      /**
-       * **`lastContactAt` : la seule mesure honnête de la liaison.** `active` est un VERROU — il
-       * passe à vrai au premier échange de clés et n'est remis à zéro que par un changement de
-       * configuration (clé, adresse, réinitialisation), jamais par une inactivité ni un délai. Il
-       * affiche donc « établie » des heures après que la machine a cessé de répondre, ce qui est
-       * exactement la situation qu'on vient diagnostiquer sur `/pilotage`. `file.dernierContact`
-       * est daté par CHAQUE datapaquet reçu (`contactMachine` dans `handleProperty`), donc il dit
-       * « elle nous parle encore » et non « elle nous a parlé un jour ». 0 = jamais.
-       */
-      session: { active: !!m.session, lastContactAt: m.file.dernierContact || null }, lastRegisterAt: m.lastRegisterAt, activeProfile: m.activeProfile, activeProfileConfirmed: m.activeProfileConfirmed,
-      /**
-       * `queue` — la file de tâches, et les vues dérivées que les autres pages lisent encore.
-       * Voir `machineActivity()`. Il n'y a plus qu'un seul état pour « ce que fait la machine »,
-       * donc plus de page qui en affirme une chose pendant qu'une autre affirme le contraire.
-       */
-      ...machineActivity(m),
-      lastMonitor: m.lastMonitor, lastDataResponse: m.lastDataResponse,
-      /**
-       * ⚠️ **Le journal n'est plus ici, et c'est le point du lot.** Mesuré sur la machine d'essai :
-       * cette réponse pesait 8 185 octets dont 5 685 (69 %) de journal — 50 lignes retéléchargées
-       * en entier à chaque poussée SSE, soit toutes les 250 ms pendant une préparation, pour
-       * ~114 octets d'information neuve. Il voyage désormais en ajouts sur le fil
-       * (`cadreJournal`), et s'amorce par `GET /api/journal`.
-       */
-    }));
+    return raw(res, JSON.stringify(buildStatusPayload(m)));
   }
   if (url === "/api/command" && req.method === "POST") {
     const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
@@ -5385,62 +5570,7 @@ async function handleApi(req, res) {
 
   // Fiche technique : ce qu'on peut lire en local + le relevé cloud figé + notre état protocole.
   if (url === "/api/system" && req.method === "GET") {
-    const store = m.store.machineView();
-    // Sondes indépendantes : en série, la page cumulait les délais d'attente (4 s + 8 s).
-    const live = await probeRegtoken(m);
-    const cloud = cloudOtaState(m);
-    return raw(res, JSON.stringify({
-      deviceSheet: DEVICE_SHEET,
-      // Fiche du catalogue EN SERVICE, sans la liste des recettes : elle fait 28 entrées ici et 48
-      // sur une Striker, personne ne les lit dans cette réponse, et /api/beverages les sert déjà.
-      model: {
-        ...modelSheet(m.catalog.key),
-        nBeverages: m.catalog.beverages.length,
-        /** Vrai si ce catalogue n'est pas celui du modèle détecté, mais un remplaçant. */
-        fallback: m.catalog.fallback,
-        detectedKey: m.modelKey,
-      },
-      identification: modelState(m),
-      network: {
-        machineIp: m.ip,
-        serverIp: CFG.serverIp,
-        serverPort: CFG.port,
-        generation: m.gen,
-        dsn: m.dsn,
-        dsnSource: m.dsnSource,
-        note: "La machine est sur un VLAN IoT isolé ; le LAN mode exige que machine → serveur soit permis.",
-      },
-      local: live,
-      protocol: {
-        lanKeyId: m.lanKeyId,
-        lanKeySet: m.lanKey.length > 0,
-        lanKeySource: m.lanKeySource,
-        sessionActive: !!m.session,
-        lastRegisterAt: m.lastRegisterAt,
-        keepaliveMs: 2500,
-        sendProperty: m.send,
-        monitorProperty: m.mon,
-        crypto: "AES-256-CBC en flux persistant, clés dérivées par double HMAC-SHA256",
-        activeProfile: m.activeProfile,
-        activeProfileConfirmed: m.activeProfileConfirmed,
-      },
-      ota: {
-        lanRequests: m.otaRequests,
-        lanNote: "En mode LAN, c'est la machine qui vient chercher l'image chez nous : aucune requête reçue signifie qu'aucun OTA n'est distribué par ce serveur.",
-        cloud,
-      },
-      // Le stockage fait partie de la fiche technique : savoir quel moteur tourne, dans quelle
-      // version de schéma et avec combien de lignes évite d'ouvrir le fichier pour le vérifier.
-      storage: storageInfo(),
-      machineState: {
-        lastMonitor: m.lastMonitor,
-        lastDataResponse: m.lastDataResponse,
-        checksums: store.checksums ?? null,
-        serialNumber: store.props?.d270_serialnumber ?? null,
-        propsRead: Object.keys(store.props ?? {}).length,
-        importedAt: store.importedAt ?? null,
-      },
-    }));
+    return raw(res, JSON.stringify(await buildSystemPayload(m)));
   }
 
   // Lecture d'un profil Bean System (nom + mouture/température/arôme) — commande ECAM 0xBA.
@@ -6253,43 +6383,7 @@ async function handleApi(req, res) {
   }
 
   if (url === "/api/stats" && req.method === "GET") {
-    const store = m.store.machineView();
-    const stats = store.stats ?? {};
-    return raw(res, JSON.stringify({
-      // Identifiant brut → valeur. La signification de chaque id n'est PAS établie : l'app les
-      // demande sans les nommer, il n'existe aucune table de correspondance dans l'APK.
-      stats: Object.fromEntries(Object.entries(stats).map(([id, v]) => [id, v.value])),
-      readAt: Object.fromEntries(Object.entries(stats).map(([id, v]) => [id, v.at])),
-      count: Object.keys(stats).length,
-      scan: machineActivity(m).statScan,
-      // Ce que l'app demande (p258z7/w.java et le viewmodel des statistiques).
-      appIds: APP_STAT_IDS,
-      // Publiées plutôt que recopiées dans la page : voir STAT_RANGES.
-      ranges: STAT_RANGES,
-      /**
-       * Le second canal : des compteurs NOMMÉS, portés par des propriétés Ayla (`compteurs.mjs`).
-       * `named` ne liste que ce qui a été lu au moins une fois ; `namedScopes` dit ce qu'il y a à
-       * demander, pour que les deux boutons sachent leur étendue sans recopier la table côté page —
-       * même raison que `ranges` juste au-dessus.
-       */
-      named: vueCompteurs(m),
-      namedScopes: Object.fromEntries(Object.entries(PORTEES_COMPTEURS).map(([k, v]) => [k, v.length])),
-      // Le second espace de paramètres (`0xA1`, mots du paramètre 500) — voir SYNC_MEANINGS. Il
-      // vient de la propriété déjà en cache : cet endpoint ne demande jamais rien à la machine.
-      sync: vueParamsSync(m),
-      // Les seuls dont la signification est établie. `raw` reste la valeur brute ; `value` est
-      // convertie quand il y a une unité (eau : 0,5 ml → litres).
-      known: Object.entries(STAT_MEANINGS)
-        .filter(([id]) => stats[id] !== undefined)
-        .map(([id, sens]) => ({
-          id: Number(id),
-          key: sens.key,
-          raw: stats[id].value,
-          value: sens.divisor ? Math.round(stats[id].value / sens.divisor) : stats[id].value,
-          unit: sens.divisor ? "L" : null,
-          at: stats[id].at,
-        })),
-    }));
+    return raw(res, JSON.stringify(buildStatsPayload(m)));
   }
 
   /**
