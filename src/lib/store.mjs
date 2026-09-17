@@ -204,7 +204,6 @@ if (fresh) {
   db.exec(`INSERT INTO machines(id, createdAt, data) VALUES('${DEFAULT_MACHINE}', ${Date.now()}, '{"label":null}')`);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   db.exec("COMMIT");
-  bootMessages.push("schéma v3 → v4 : table des jetons d'API MCP ajoutée");
 } else if (from < SCHEMA_VERSION) {
   migrateSchema(from);
 } else if (from > SCHEMA_VERSION) {
