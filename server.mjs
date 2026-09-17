@@ -5216,9 +5216,14 @@ function registerMcpTools(server, tokenRow) {
   defineMcpTool(server, tokenRow, {
     name: "bean_adapt_simulate", categorie: "grains", nature: "lecture",
     description: "Simule la règle d'affinage (computeBeanAdapt) sans toucher la machine : réglages actuels (grinder/temperature/aroma) + réponses du questionnaire (flowTime/crema/taste).",
+    // Mêmes bornes que la branche HTTP (`/api/beanadapt/simulate`, plus haut) : `grinder` /
+    // `temperature` / `aroma` finis, `flowTime` fini et dans [0, 120] — sinon un `flowTime` en
+    // millisecondes (25000) passerait pour une réponse plausible au lieu d'être rejeté, comme un
+    // décalage d'un octet dans une trame. `crema` / `taste` ne sont pas bornés côté HTTP non plus ;
+    // on ne leur impose donc rien de plus que d'être des nombres.
     inputSchema: {
-      grinder: z.number(), temperature: z.number(), aroma: z.number(),
-      flowTime: z.number(), crema: z.number(), taste: z.number(),
+      grinder: z.number().finite(), temperature: z.number().finite(), aroma: z.number().finite(),
+      flowTime: z.number().finite().min(0).max(120), crema: z.number(), taste: z.number(),
     },
     run: async ({ grinder, temperature, aroma, flowTime, crema, taste }) =>
       computeBeanAdapt({ grinder, temperature, aroma }, { flowTime, crema, taste }),
