@@ -49,7 +49,7 @@ import { httpJson, echangeClesVersApp, analyserCommandes, paquetDatapoint, paque
 import { RANG, DELAIS, MAX_FILE, nouvelleFile, tache, pasLecture, pasTrame, enfiler, aServir,
          reponse as apparier, contact as contactMachine, tic, vue as vueFile, annuler,
          courante, vide } from "./src/lib/tasks.mjs";
-import { bootMessages as storeBootMessages, storageInfo, forMachine, listMachines, createMachine, setMachineLabel, deleteMachine, getSetting, setSetting, clearSetting, DEFAULT_MACHINE } from "./src/lib/store.mjs";
+import { bootMessages as storeBootMessages, storageInfo, forMachine, listMachines, createMachine, setMachineLabel, deleteMachine, getSetting, setSetting, clearSetting, DEFAULT_MACHINE, createMcpToken, listMcpTokens, revokeMcpToken, MCP_SCOPE_CATEGORIES, MCP_SCOPE_NATURES_PAR_CATEGORIE } from "./src/lib/store.mjs";
 // Identification du modele : la machine publie son numero de serie, et les 5 chiffres qui
 // indexent la table constructeur sont dedans. Aucun cloud — voir machine-models.mjs.
 import { MODELS, MODELS_TABLE_VERSION, SERIAL_PROP, findModel, identify as identifyModel } from "./src/lib/machine-models.mjs";
@@ -4782,6 +4782,35 @@ async function handleApi(req, res) {
       // même numérotation : voir `cadreJournal`. Le laisser ici l'aurait fait retélécharger en
       // entier à chaque poussée, ce qui est précisément ce que ce lot supprime.
     }));
+  }
+
+  /**
+   * Les jetons MCP. Global comme `/api/machines` et `/api/apps` : un jeton n'appartient pas à la
+   * machine qu'on regarde, et il est traité ici, avant toute résolution de machine.
+   */
+  if (url === "/api/mcp-tokens" && req.method === "GET") {
+    return raw(res, JSON.stringify({ tokens: listMcpTokens(), categories: MCP_SCOPE_CATEGORIES, naturesParCategorie: MCP_SCOPE_NATURES_PAR_CATEGORIE }));
+  }
+  if (url === "/api/mcp-tokens" && req.method === "POST") {
+    const b = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+    const name = String(b.name ?? "").trim();
+    if (!name) return raw(res, JSON.stringify({ error: "nom de jeton requis" }), 400);
+    const scopes = Array.isArray(b.scopes) ? b.scopes.filter((s) => typeof s === "string") : [];
+    const valides = scopes.every((s) => {
+      const [cat, nat] = s.split(":");
+      return MCP_SCOPE_CATEGORIES.includes(cat) && (MCP_SCOPE_NATURES_PAR_CATEGORIE[cat] ?? []).includes(nat);
+    });
+    if (!valides) return raw(res, JSON.stringify({ error: "portee invalide : attendu categorie:nature parmi " + MCP_SCOPE_CATEGORIES.join(", ") }), 400);
+    const created = createMcpToken({ name, scopes });
+    L("sys", "jeton MCP", `créé « ${name} » (${scopes.length} portée(s))`);
+    return raw(res, JSON.stringify(created), 201);
+  }
+  if (url.startsWith("/api/mcp-tokens/") && req.method === "DELETE") {
+    const id = Number(url.slice("/api/mcp-tokens/".length));
+    if (!Number.isInteger(id)) return raw(res, JSON.stringify({ error: "identifiant de jeton invalide" }), 400);
+    const ok = revokeMcpToken(id);
+    if (ok) L("sys", "jeton MCP", `révoqué #${id}`);
+    return raw(res, JSON.stringify({ revoked: ok }), ok ? 200 : 404);
   }
 
   // À quelle machine cette requête s'adresse-t-elle ? Un identifiant inconnu est refusé, jamais
