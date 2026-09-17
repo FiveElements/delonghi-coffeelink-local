@@ -1133,6 +1133,40 @@ function startProgram(m, ecamB64, label, durationMs = 75000, sustain = "monitor"
   return enfilerTache(m, tache({ label, rang, pas, cle, meta, i18n, genre: lecture ? "lecture" : "commande" }), `${label} — ${decrireCommande(m, ecamB64)} · présence ${sustain}`);
 }
 
+/**
+ * Prépare et met en file une boisson — logique exacte de la branche `dispense` de
+ * `/api/command`, extraite pour être appelée aussi bien par l'API que par l'outil MCP
+ * `start_beverage`. Lance une VRAIE commande : jamais de simulation.
+ *
+ * Lève `Error("recette inconnue")` quand `recipeId` ne désigne rien — l'appelant HTTP
+ * l'inspecte pour renvoyer 404 comme avant l'extraction ; l'outil MCP la laisse remonter telle
+ * quelle, `defineMcpTool` la rapportant déjà comme `isError`.
+ */
+async function executeDispense(m, { beverageId, profileId, recipeId, params } = {}) {
+  let bev, prof, resolvedParams;
+  if (recipeId) {
+    const r = m.store.listRecipes().find((x) => x.id === recipeId);
+    if (!r) throw new Error("recette inconnue");
+    ({ beverageId: bev, profileId: prof, params: resolvedParams } = r);
+  } else {
+    bev = Number(beverageId ?? 1);
+    prof = Number(profileId ?? 1);
+    resolvedParams = params ?? [];
+  }
+  m.activeProfile = Number(prof) || 1;
+  m.activeProfileConfirmed = true;
+  rememberActiveProfile(m);
+  const act = actionPreparer(resolvedParams);
+  const frame = frameDispense(bev, prof, MODE.START, act, resolvedParams);
+  const label = `Préparer ${bevLabel(m, bev)}${act === ACT.PREPARE_INVERSION ? " (lait d'abord)" : ""}`;
+  const r = bevRef(m, bev);
+  const cleLibelle = { k: "dispense", p: { inversion: act === ACT.PREPARE_INVERSION ? 1 : 0, ...(r.p ?? {}) }, refs: r.refs };
+  const ecamB64 = datapointValue(frame);
+  const t = startProgram(m, ecamB64, label, 75000, "monitor", { rang: RANG.COMMANDE, cle: cleFusion(ecamB64), i18n: cleLibelle, meta: { dispense: true } });
+  const reg = await postLocalReg(m);
+  return { program: label, frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(), register: reg, ...tacheRendue(t) };
+}
+
 /** Met une LECTURE de propriétés Ayla en file : une tâche, un pas par propriété. */
 function startImport(m, queue, durationMs = 120000, { label = null, rang = RANG.LECTURE, cle = null, meta = null, i18n = null } = {}) {
   const nom = label ?? (queue.length === 1 ? `Lecture ${queue[0]}` : `Lecture de ${queue.length} propriétés`);
@@ -5253,6 +5287,29 @@ function registerMcpTools(server, tokenRow) {
     inputSchema: { machine: z.string().optional() },
     run: async ({ machine } = {}) => buildSettingsPayload(await resolveMachineForTool(machine)),
   });
+
+  /**
+   * Premier outil d'ACTION : déclenche une VRAIE préparation sur la machine physique, par le
+   * même chemin que la branche `dispense` de `/api/command` (`executeDispense`, near
+   * `startProgram`). Comme `handleApi`, on résout la machine via `resolveMachineForTool` — pas
+   * `pickMachine` directement — pour que la sonde DSN paresseuse tourne aussi côté MCP.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "start_beverage", categorie: "boissons", nature: "action",
+    description: "Lance une VRAIE préparation sur la machine physique. Action irréversible une fois envoyée.",
+    annotations: { destructiveHint: true, idempotentHint: false },
+    inputSchema: {
+      machine: z.string().optional(),
+      beverageId: z.number().optional(),
+      profileId: z.number().optional(),
+      recipeId: z.string().optional(),
+      params: z.array(z.object({ id: z.number(), value: z.number() })).optional(),
+    },
+    run: async ({ machine, ...args } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      return executeDispense(m, args);
+    },
+  });
 }
 
 // --- API de contrôle ---
@@ -5538,18 +5595,17 @@ async function handleApi(req, res) {
       }
       else if (b.action === "selectBean") { frame = frameSelectBean(Number(b.beanId ?? 1)); label = `Bean ${b.beanId}`; cleLibelle = { k: "selectBean", p: { index: Number(b.beanId ?? 1) } }; dur = 20000; }
       else if (b.action === "stop") { frame = frameDispense(Number(b.beverageId ?? 1), Number(b.profileId ?? 1), MODE.STOPV2, ACT.PREPARE, []); label = "Arrêt"; cleLibelle = { k: "stop" }; dur = 15000; }
+      // `executeDispense` fait tout — trame, mise en file, `postLocalReg` — donc cette branche
+      // renvoie directement au lieu de retomber dans la queue commune plus bas. Seule
+      // « recette inconnue » garde son 404 différencié : on l'inspecte sur l'erreur levée plutôt
+      // que de dupliquer la recherche de recette ici.
       else if (b.action === "dispense") {
-        let bev, prof, params;
-        if (b.recipeId) { const r = m.store.listRecipes().find((x) => x.id === b.recipeId); if (!r) return raw(res, JSON.stringify({ error: "recette inconnue" }), 404); ({ beverageId: bev, profileId: prof, params } = r); }
-        else { bev = Number(b.beverageId ?? 1); prof = Number(b.profileId ?? 1); params = b.params ?? []; }
-        m.activeProfile = Number(prof) || 1;
-        m.activeProfileConfirmed = true;
-        rememberActiveProfile(m);
-        const act = actionPreparer(params);
-        frame = frameDispense(bev, prof, MODE.START, act, params);
-        label = `Préparer ${bevLabel(m, bev)}${act === ACT.PREPARE_INVERSION ? " (lait d'abord)" : ""}`;
-        const r = bevRef(m, bev);
-        cleLibelle = { k: "dispense", p: { inversion: act === ACT.PREPARE_INVERSION ? 1 : 0, ...(r.p ?? {}) }, refs: r.refs };
+        try {
+          const out = await executeDispense(m, { beverageId: b.beverageId, profileId: b.profileId, recipeId: b.recipeId, params: b.params });
+          return raw(res, JSON.stringify(out));
+        } catch (e) {
+          return raw(res, JSON.stringify({ error: e.message }), e.message === "recette inconnue" ? 404 : 400);
+        }
       } else return raw(res, JSON.stringify({ error: "action inconnue" }), 400);
     } catch (e) { return raw(res, JSON.stringify({ error: e.message }), 400); }
     const ecamB64 = datapointValue(frame);
@@ -5570,7 +5626,9 @@ async function handleApi(req, res) {
     // sélections du même profil n'en font qu'une, qu'elles viennent d'un téléphone, de deux
     // onglets, ou d'un téléphone et d'un onglet. Une règle par émetteur aurait fusionné ici et
     // pas là, pour la même trame.
-    const t = startProgram(m, ecamB64, label, dur, sustain, { rang, cle: cleFusion(ecamB64), i18n: cleLibelle, meta: b.action === "dispense" ? { dispense: true } : null });
+    // `b.action === "dispense"` ne peut plus arriver ici : cette branche renvoie directement
+    // depuis `executeDispense`, ci-dessus — `meta.dispense` est donc posé là-bas, pas ici.
+    const t = startProgram(m, ecamB64, label, dur, sustain, { rang, cle: cleFusion(ecamB64), i18n: cleLibelle, meta: null });
     // La file de lecture est écoulée quand aucun programme n'est actif : elle s'enchaîne donc
     // naturellement après la fenêtre du programme ci-dessus.
     if (refreshOrderFor) {
