@@ -4956,6 +4956,168 @@ function buildStatsPayload(m) {
   };
 }
 
+/**
+ * Le corps exact de `GET /api/beverages`, extrait pour la même raison que `buildStatusPayload` —
+ * la route HTTP et l'outil MCP `list_beverages` appellent tous les deux CETTE fonction.
+ * `profileId` vaut 1 par défaut, comme le fait la route quand la query string ne le précise pas.
+ */
+function buildBeveragesPayload(m, profileId = 1) {
+  const store = m.store.machineView();
+  const beverages = vueBoissons(m, store, profileId);
+  // Ordre d'affichage de la machine pour ce profil (propriété de priorité), s'il est connu.
+  const prioProp = `d${String(260 + profileId).padStart(3, "0")}_${profileId}_rec_priority`;
+  const order = store.props[prioProp]?.beverageIds ?? null;
+  return {
+    model: { key: m.catalog.key, type: m.catalog.model.type, appModelId: m.catalog.model.appModelId, productCode: m.catalog.model.productCode, nProfiles: m.catalog.model.nProfiles, protocolVersion: m.catalog.model.protocolVersion, fallback: m.catalog.fallback },
+    categories: CATEGORIES, profileId, beverages, order, orderProp: prioProp,
+    importedAt: store.importedAt,
+    // Déduit de la file : la lecture en cours, ou la dernière terminée si plus rien ne tourne —
+    // c'est `active` qui les distingue. Auparavant un import expiré dans le vide restait « en
+    // cours » pour toujours et maintenait la page en relecture.
+    import: vueLecture(m),
+  };
+}
+
+/**
+ * Le corps exact de `GET /api/profiles`, même règle : `handleApi` et l'outil MCP `list_profiles`
+ * appellent tous les deux CETTE fonction.
+ */
+function buildProfilesPayload(m) {
+  const store = m.store.machineView();
+  const names = readNames(store, "profileNames");
+  const customNames = readNames(store, "customNames");
+  // La machine nomme d'office les profils jamais personnalisés (« Profil 4 »). On distingue
+  // ce nom par défaut d'un vrai nom choisi par l'utilisateur : la page / n'affiche que
+  // les profils réellement renommés.
+  const isDefaultName = (n) => n == null || /^profil(e)?\s*\d+$/i.test(n.trim());
+  // Une seule fois pour les cinq profils : la table des noms SAISIS sur la machine, celle qui
+  // doit primer sur le catalogue partout où une boisson est nommée.
+  const persoNames = machineBeverageNames(store);
+  const profiles = Array.from({ length: m.catalog.model.nProfiles }, (_, i) => {
+    const id = i + 1;
+    const prio = PRIORITY_PROPS.filter((x) => x.profileId === id)
+      .map((x) => store.props[x.prop])
+      .find((d) => d?.beverageIds?.length);
+    const name = names[id]?.name ?? null;
+    return {
+      id,
+      name,
+      renamed: name != null && !isDefaultName(name),
+      icon: names[id]?.icon ?? null,
+      source: names[id]?.prop ?? null,
+      /**
+       * **L'ordre des favoris porte de quoi nommer la boisson SANS recopier notre français.**
+       *
+       * On envoie donc le `slug` (identifiant, traduit côté client) et le `machineName` quand il
+       * existe (saisi par l'utilisateur, jamais traduit). `label` reste, en repli.
+       */
+      order: prio
+        ? prio.beverageIds.map((bid) => ({
+            id: bid,
+            slug: m.catalog.byId(bid)?.slug ?? null,
+            label: m.catalog.byId(bid)?.label ?? null,
+            machineName: persoNames[bid]?.name ?? null,
+          }))
+        : null,
+    };
+  });
+  // Le nombre d'emplacements perso dépend du modèle : 6 sur un PD_SOUL, 3 sur un PD_SOUL_BETTER.
+  const customs = Array.from({ length: m.catalog.model.nCustomRecipes }, (_, i) => i + 1).map((n) => ({
+    slot: n,
+    beverageId: 229 + n,
+    name: customNames[n]?.name ?? null,
+    icon: customNames[n]?.icon ?? null,
+    source: customNames[n]?.prop ?? null,
+  }));
+  return {
+    // `namesCustomizable` / `iconsCustomizable` : drapeaux du catalogue extrait de l'APK. Ils
+    // décident si la page propose de renommer — sur un modèle qui dit non, la trame `0xA5`
+    // partirait quand même, et on ignore ce qu'elle y ferait.
+    model: { key: m.catalog.key, type: m.catalog.model.type, nProfiles: m.catalog.model.nProfiles, customizableProfiles: m.catalog.model.customizableProfiles, nCustomRecipes: m.catalog.model.nCustomRecipes, namesCustomizable: m.catalog.model.profileNamesCustomizable !== false, iconsCustomizable: m.catalog.model.profileIconsCustomizable !== false },
+    profiles, customs,
+    props: ALL_PROFILE_PROPS.map((x) => {
+      const d = store.props[x.prop];
+      return { prop: x.prop, kind: x.kind, stride: x.stride ?? null, state: !d ? "unread" : d.absent ? "absent" : "read" };
+    }),
+    importedAt: store.importedAt,
+    import: vueLecture(m),
+  };
+}
+
+/**
+ * Le corps exact de `GET /api/beanadapt`, même règle : `handleApi` et l'outil MCP `get_bean_adapt`
+ * appellent tous les deux CETTE fonction.
+ */
+function buildBeanAdaptPayload(m) {
+  /* Le visuel de chaque emplacement voyage AVEC la liste : la date joue le rôle de version dans
+     l'URL de la vignette, exactement comme pour les configurations mémorisées. */
+  const beans = vueBeansMachine(m);
+  return {
+    beans,
+    // La bibliothèque locale, servie avec les grains de la machine : la page les montre côte à
+    // côte, une seule requête suffit.
+    presets: vueBeanPresets(m),
+    bounds: {
+      grinder: { min: GRINDER_MIN, max: GRINDER_MAX, verified: true },
+      aroma: { min: AROMA_MIN, max: AROMA_MAX, verified: true },
+      temperature: { min: TEMPERATURE_MIN, max: TEMPERATURE_MAX, verified: false },
+    },
+    activeProfile: m.activeProfile,
+    scan: machineActivity(m).beanScan,
+    /**
+     * **Ce que la MACHINE mesure pour l'affinage** — la seule source honnête des deux. `null`
+     * partout tant que la propriété n'est pas arrivée — l'interface dit « pas encore lu », elle
+     * n'invente pas un zéro.
+     */
+    sync: vueBeanSync(m),
+  };
+}
+
+/**
+ * Le corps exact de `GET /api/beanpresets`, même règle : `handleApi` et l'outil MCP
+ * `list_bean_presets` appellent tous les deux CETTE fonction.
+ */
+function buildBeanPresetsPayload(m) {
+  return { presets: vueBeanPresets(m) };
+}
+
+/**
+ * Le corps exact de `GET /api/beansystem` — extrait par cohérence avec les six autres branches de
+ * cette tâche, même si aucun outil MCP ne l'appelle encore (les quatre outils « grains » de cette
+ * tâche couvrent `/api/beanadapt` et `/api/beanpresets`, pas la liste brute des Bean Systems).
+ */
+function buildBeanSystemPayload(m) {
+  return { beanSystems: m.store.allBeanSystems() };
+}
+
+/**
+ * Le corps exact de `GET /api/recipes`, même règle : `handleApi` et l'outil MCP `list_recipes`
+ * appellent tous les deux CETTE fonction.
+ */
+function buildRecipesPayload(m) {
+  return vueRecettes(m);
+}
+
+/**
+ * Le corps exact de `GET /api/settings`, même règle : `handleApi` et l'outil MCP `get_settings`
+ * appellent tous les deux CETTE fonction.
+ *
+ * ⚠️ **Machine-scopée, contrairement à ce que supposait le brief de la Task 8.** Le brief donnait
+ * `get_settings` pour indépendant de la machine, « comme `mcp_tokens` » — mais cette route lit
+ * `m.store`, `m.modelKey` et `m.catalog` : ce sont les réglages DE LA MACHINE (dureté d'eau, arrêt
+ * automatique…), pas la table `settings` machine-indépendante de `store.mjs` (celle des jetons
+ * MCP, par exemple). L'outil suit donc `resolveMachineForTool`, comme les six autres outils
+ * « machine » de cette tâche.
+ */
+function buildSettingsPayload(m) {
+  return {
+    reglages: vueReglages(m, m.store.getMeta("reglages") ?? {}),
+    model: m.modelKey ?? null,
+    modelName: m.catalog?.model?.name ?? null,
+    lecture: vueLecture(m),
+  };
+}
+
 function registerMcpTools(server, tokenRow) {
   defineMcpTool(server, tokenRow, {
     name: "get_status", categorie: "statut", nature: "lecture",
@@ -4997,6 +5159,94 @@ function registerMcpTools(server, tokenRow) {
     description: "Fenêtre du journal (déjà survenu, jamais un flux) — utiliser `depuis` pour ne récupérer que la suite d'une lecture précédente.",
     inputSchema: { depuis: z.number().optional() },
     run: async ({ depuis } = {}) => buildJournalPayload(depuis ?? 0),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "list_beverages", categorie: "boissons", nature: "lecture",
+    description: "Catalogue des boissons du modèle de la machine.",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => buildBeveragesPayload(await resolveMachineForTool(machine)),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "get_beverage", categorie: "boissons", nature: "lecture",
+    description: "Détail d'une boisson du catalogue par son identifiant.",
+    inputSchema: { beverageId: z.number(), machine: z.string().optional() },
+    run: async ({ beverageId, machine } = {}) => {
+      const m = await resolveMachineForTool(machine);
+      const bev = m.catalog.byId(Number(beverageId));
+      if (!bev) throw new Error(`boisson ${beverageId} inconnue sur ${m.catalog.model.type}`);
+      return bev;
+    },
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "list_profiles", categorie: "profils", nature: "lecture",
+    description: "Profils de la machine (noms, favoris).",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => buildProfilesPayload(await resolveMachineForTool(machine)),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "get_bean_adapt", categorie: "grains", nature: "lecture",
+    description: "Lecture du Bean System (configurations de grains de la machine).",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => buildBeanAdaptPayload(await resolveMachineForTool(machine)),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "list_bean_presets", categorie: "grains", nature: "lecture",
+    description: "Presets de grain mémorisés côté serveur, avec leurs visuels.",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => buildBeanPresetsPayload(await resolveMachineForTool(machine)),
+  });
+
+  /**
+   * `bean_adapt_simulate` / `bean_adapt_creation_rule` restent SANS_MACHINE, comme leurs
+   * équivalents HTTP (`/api/beanadapt/simulate`, `/api/beanadapt/creation`) : aucune résolution de
+   * machine, `computeBeanAdapt` / `composeGrainNeuf` sont des fonctions pures de
+   * `src/lib/bean-adapt.mjs`, appelées directement.
+   *
+   * ⚠️ Les schémas ci-dessous suivent la signature RÉELLE de ces fonctions
+   * (`computeBeanAdapt(current, answers)`, `composeGrainNeuf({melange, torrefaction})`), pas la
+   * forme abrégée `{question1, question2, flowTimeMs}` / `{blend, roast}` du brief de la Task 8 —
+   * ces noms-là n'existent nulle part dans `bean-adapt.mjs` ni dans les branches HTTP
+   * `/api/beanadapt/simulate` et `/api/beanadapt/creation` qui les appellent déjà.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "bean_adapt_simulate", categorie: "grains", nature: "lecture",
+    description: "Simule la règle d'affinage (computeBeanAdapt) sans toucher la machine : réglages actuels (grinder/temperature/aroma) + réponses du questionnaire (flowTime/crema/taste).",
+    inputSchema: {
+      grinder: z.number(), temperature: z.number(), aroma: z.number(),
+      flowTime: z.number(), crema: z.number(), taste: z.number(),
+    },
+    run: async ({ grinder, temperature, aroma, flowTime, crema, taste }) =>
+      computeBeanAdapt({ grinder, temperature, aroma }, { flowTime, crema, taste }),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "bean_adapt_creation_rule", categorie: "grains", nature: "lecture",
+    description: "Règle de création d'un nouveau grain (composeGrainNeuf), table figée De'Longhi : mélange (1 arabica, 2 arabica+robusta) × torréfaction (1 claire … 4 très foncée).",
+    inputSchema: { melange: z.number(), torrefaction: z.number() },
+    run: async ({ melange, torrefaction }) => composeGrainNeuf({ melange, torrefaction }),
+  });
+
+  defineMcpTool(server, tokenRow, {
+    name: "list_recipes", categorie: "recettes", nature: "lecture",
+    description: "Recettes locales enregistrées sur le serveur.",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => buildRecipesPayload(await resolveMachineForTool(machine)),
+  });
+
+  /**
+   * ⚠️ Machine-scopé, pas indépendant comme le supposait le brief — voir la remarque sur
+   * `buildSettingsPayload` ci-dessus.
+   */
+  defineMcpTool(server, tokenRow, {
+    name: "get_settings", categorie: "reglages", nature: "lecture",
+    description: "Réglages persistés de la machine (dureté d'eau, arrêt automatique…).",
+    inputSchema: { machine: z.string().optional() },
+    run: async ({ machine } = {}) => buildSettingsPayload(await resolveMachineForTool(machine)),
   });
 }
 
@@ -5328,21 +5578,8 @@ async function handleApi(req, res) {
   }
   // Catalogue des boissons de la machine + ce qui a été lu dessus.
   if (url === "/api/beverages" && req.method === "GET") {
-    const store = m.store.machineView();
     const profileId = Number(new URL(req.url, "http://x").searchParams.get("profile") ?? 1);
-    const beverages = vueBoissons(m, store, profileId);
-    // Ordre d'affichage de la machine pour ce profil (propriété de priorité), s'il est connu.
-    const prioProp = `d${String(260 + profileId).padStart(3, "0")}_${profileId}_rec_priority`;
-    const order = store.props[prioProp]?.beverageIds ?? null;
-    return raw(res, JSON.stringify({
-      model: { key: m.catalog.key, type: m.catalog.model.type, appModelId: m.catalog.model.appModelId, productCode: m.catalog.model.productCode, nProfiles: m.catalog.model.nProfiles, protocolVersion: m.catalog.model.protocolVersion, fallback: m.catalog.fallback },
-      categories: CATEGORIES, profileId, beverages, order, orderProp: prioProp,
-      importedAt: store.importedAt,
-      // Déduit de la file : la lecture en cours, ou la dernière terminée si plus rien ne tourne —
-      // c'est `active` qui les distingue. Auparavant un import expiré dans le vide restait « en
-      // cours » pour toujours et maintenait la page en relecture.
-      import: vueLecture(m),
-    }));
+    return raw(res, JSON.stringify(buildBeveragesPayload(m, profileId)));
   }
 
   // Import : lit sur la machine les bornes et/ou les recettes du profil, en LAN pur.
@@ -5431,75 +5668,7 @@ async function handleApi(req, res) {
 
   // Profils : noms, icônes, noms des recettes perso, ordre des favoris.
   if (url === "/api/profiles" && req.method === "GET") {
-    const store = m.store.machineView();
-    const names = readNames(store, "profileNames");
-    const customNames = readNames(store, "customNames");
-    // La machine nomme d'office les profils jamais personnalisés (« Profil 4 »). On distingue
-    // ce nom par défaut d'un vrai nom choisi par l'utilisateur : la page / n'affiche que
-    // les profils réellement renommés.
-    const isDefaultName = (n) => n == null || /^profil(e)?\s*\d+$/i.test(n.trim());
-    // Une seule fois pour les cinq profils : la table des noms SAISIS sur la machine, celle qui
-    // doit primer sur le catalogue partout où une boisson est nommée.
-    const persoNames = machineBeverageNames(store);
-    const profiles = Array.from({ length: m.catalog.model.nProfiles }, (_, i) => {
-      const id = i + 1;
-      const prio = PRIORITY_PROPS.filter((x) => x.profileId === id)
-        .map((x) => store.props[x.prop])
-        .find((d) => d?.beverageIds?.length);
-      const name = names[id]?.name ?? null;
-      return {
-        id,
-        name,
-        renamed: name != null && !isDefaultName(name),
-        icon: names[id]?.icon ?? null,
-        source: names[id]?.prop ?? null,
-        /**
-         * **L'ordre des favoris porte de quoi nommer la boisson SANS recopier notre français.**
-         *
-         * Il n'émettait qu'un `label` — le libellé français du catalogue — que `/profils` rendait
-         * brut. Deux défauts pour le prix d'un : la chaîne n'était pas traduisible, et surtout
-         * elle **contournait `machineBeverageNames`**, donc un emplacement perso renommé sur la
-         * machine s'affichait ici sous son nom d'usine. C'est exactement la divergence que
-         * `/api/beverages` avait déjà corrigée — « Recette perso 1 » d'un côté, « Lacteso » de
-         * l'autre — reproduite sur l'autre page.
-         *
-         * On envoie donc le `slug` (identifiant, traduit côté client) et le `machineName` quand il
-         * existe (saisi par l'utilisateur, jamais traduit). `label` reste, en repli.
-         */
-        order: prio
-          ? prio.beverageIds.map((bid) => ({
-              id: bid,
-              slug: m.catalog.byId(bid)?.slug ?? null,
-              label: m.catalog.byId(bid)?.label ?? null,
-              machineName: persoNames[bid]?.name ?? null,
-            }))
-          : null,
-      };
-    });
-    // Le nombre d'emplacements perso dépend du modèle : 6 sur un PD_SOUL, 3 sur un PD_SOUL_BETTER.
-    const customs = Array.from({ length: m.catalog.model.nCustomRecipes }, (_, i) => i + 1).map((n) => ({
-      slot: n,
-      beverageId: 229 + n,
-      name: customNames[n]?.name ?? null,
-      icon: customNames[n]?.icon ?? null,
-      source: customNames[n]?.prop ?? null,
-    }));
-    return raw(res, JSON.stringify({
-      // `namesCustomizable` / `iconsCustomizable` : drapeaux du catalogue extrait de l'APK. Ils
-      // décident si la page propose de renommer — sur un modèle qui dit non, la trame `0xA5`
-      // partirait quand même, et on ignore ce qu'elle y ferait.
-      model: { key: m.catalog.key, type: m.catalog.model.type, nProfiles: m.catalog.model.nProfiles, customizableProfiles: m.catalog.model.customizableProfiles, nCustomRecipes: m.catalog.model.nCustomRecipes, namesCustomizable: m.catalog.model.profileNamesCustomizable !== false, iconsCustomizable: m.catalog.model.profileIconsCustomizable !== false },
-      profiles, customs,
-      props: ALL_PROFILE_PROPS.map((x) => {
-        const d = store.props[x.prop];
-        return { prop: x.prop, kind: x.kind, stride: x.stride ?? null, state: !d ? "unread" : d.absent ? "absent" : "read" };
-      }),
-      importedAt: store.importedAt,
-      // Déduit de la file : la lecture en cours, ou la dernière terminée si plus rien ne tourne —
-      // c'est `active` qui les distingue. Auparavant un import expiré dans le vide restait « en
-      // cours » pour toujours et maintenait la page en relecture.
-      import: vueLecture(m),
-    }));
+    return raw(res, JSON.stringify(buildProfilesPayload(m)));
   }
 
   if (url === "/api/profiles/import" && req.method === "POST") {
@@ -5581,7 +5750,7 @@ async function handleApi(req, res) {
     return raw(res, JSON.stringify({ sent: true, index, frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(), register: reg, ...tacheRendue(t) }));
   }
   if (url === "/api/beansystem" && req.method === "GET") {
-    return raw(res, JSON.stringify({ beanSystems: m.store.allBeanSystems() }));
+    return raw(res, JSON.stringify(buildBeanSystemPayload(m)));
   }
 
   /**
@@ -5670,34 +5839,7 @@ async function handleApi(req, res) {
   }
 
   if (url === "/api/beanadapt" && req.method === "GET") {
-    /* Le visuel de chaque emplacement voyage AVEC la liste : la date joue le rôle de version dans
-       l'URL de la vignette, exactement comme pour les configurations mémorisées. */
-    const beans = vueBeansMachine(m);
-    return raw(res, JSON.stringify({
-      beans,
-      // La bibliothèque locale, servie avec les grains de la machine : la page les montre côte à
-      // côte, une seule requête suffit.
-      presets: vueBeanPresets(m),
-      bounds: {
-        grinder: { min: GRINDER_MIN, max: GRINDER_MAX, verified: true },
-        aroma: { min: AROMA_MIN, max: AROMA_MAX, verified: true },
-        temperature: { min: TEMPERATURE_MIN, max: TEMPERATURE_MAX, verified: false },
-      },
-      activeProfile: m.activeProfile,
-      scan: machineActivity(m).beanScan,
-      /**
-       * **Ce que la MACHINE mesure pour l'affinage** — et c'est la seule source honnête des deux.
-       *
-       * L'assistant demandait le temps d'écoulement au clavier. Or l'appareil le chronomètre
-       * lui-même et nous l'envoie déjà dans `d260_beansystem_sync_par` : le taper, c'est remplacer
-       * une mesure par un souvenir. Le compteur d'espressos qui l'accompagne est le verrou de
-       * l'app officielle (voir `affinagePermis`).
-       *
-       * `null` partout tant que la propriété n'est pas arrivée — l'interface dit « pas encore lu »,
-       * elle n'invente pas un zéro.
-       */
-      sync: vueBeanSync(m),
-    }));
+    return raw(res, JSON.stringify(buildBeanAdaptPayload(m)));
   }
 
   /**
@@ -5709,7 +5851,7 @@ async function handleApi(req, res) {
    * réglage inapplicable ne servirait qu'à faire échouer l'écriture plus tard, loin de la saisie.
    */
   if (url === "/api/beanpresets" && req.method === "GET") {
-    return raw(res, JSON.stringify({ presets: vueBeanPresets(m) }));
+    return raw(res, JSON.stringify(buildBeanPresetsPayload(m)));
   }
 
   /**
@@ -6095,12 +6237,7 @@ async function handleApi(req, res) {
    * un modèle donné et que la seconde ne coûte qu'un pas. `source` dira laquelle a répondu.
    */
   if (url === "/api/settings" && req.method === "GET") {
-    return raw(res, JSON.stringify({
-      reglages: vueReglages(m, m.store.getMeta("reglages") ?? {}),
-      model: m.modelKey ?? null,
-      modelName: m.catalog?.model?.name ?? null,
-      lecture: vueLecture(m),
-    }));
+    return raw(res, JSON.stringify(buildSettingsPayload(m)));
   }
   if (url === "/api/settings" && req.method === "POST") {
     const props = [];
@@ -6449,7 +6586,7 @@ async function handleApi(req, res) {
 
   if (url === "/api/register" && req.method === "POST") { const r = await postLocalReg(m); return raw(res, JSON.stringify(r)); }
   if (url === "/api/recipes") {
-    if (req.method === "GET") return raw(res, JSON.stringify(vueRecettes(m)));
+    if (req.method === "GET") return raw(res, JSON.stringify(buildRecipesPayload(m)));
     if (req.method === "POST") {
       const r = JSON.parse((await readBody(req)).toString("utf8"));
       // L'id est la clé primaire : sans lui, l'ancien code écrivait une recette anonyme que la
