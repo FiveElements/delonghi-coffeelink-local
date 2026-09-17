@@ -94,7 +94,11 @@ spécificités du conteneur, dans [DOCKER.md](DOCKER.md). L'essentiel :
 | `LANIP_KEY`, `LANIP_KEY_ID` | la clé LAN — optionnelle, récupérable dans l'interface |
 | `MACHINE_DSN` | forçage du numéro de série ; découvert automatiquement sinon |
 | `MACHINE_MODEL_KEY` | forçage du modèle ; lu sur la machine sinon |
+| `MACHINE_GENERATION` | forçage de la génération ECAM (`classic` / `striker`) ; déduite du modèle sinon |
 | `DATA_DIR`, `DATABASE_FILE` | emplacement du stockage SQLite |
+| `GIGYA_API_KEY`, `GIGYA_DATACENTER`, `AYLA_APP_ID`, `AYLA_APP_SECRET`, `AYLA_REFRESH_PATH` | surchargent les constantes APK de `cloud-app.json` pour la récupération de la clé LAN — rien à saisir en usage normal, utile seulement hors zone Europe ou après une rotation côté De'Longhi |
+| `AYLA_TOKEN` | optionnel ; sert uniquement à la vérification OTA cloud de la page Système, pas au pilotage local |
+| `PROXY_APPS` | **éteint par défaut.** Allume le multiplexeur d'applications : le serveur répond alors à `/regtoken.json` et `/local_reg.json` comme la machine, pour que plusieurs apps se partagent son unique `local_reg`. C'est une usurpation, à n'allumer que sur son propre réseau. Le SDK Ayla construit ses URL sans port (`http://<ip>/`), donc les apps ne cherchent la machine que sur le port 80 : il faut y écouter (`SERVER_PORT=80`) ou rediriger, sinon aucune ne nous trouve |
 
 Les valeurs statiques de l'APK nécessaires à la récupération de la clé LAN ne sont **pas** à
 saisir : elles sont livrées dans [`src/lib/cloud-app.json`](src/lib/cloud-app.json). Elles ne sont
