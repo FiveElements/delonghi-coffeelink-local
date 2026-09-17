@@ -517,6 +517,20 @@ function pickMachine(req) {
   return { m };
 }
 
+/**
+ * Résolution de machine pour un outil MCP : même comportement que le préambule de `handleApi`
+ * (`pickMachine` puis sonde DSN paresseuse — voir plus bas, § *handleApi*), pour que les deux
+ * chemins ne divergent jamais sur le DSN. Sans ceci, `GET /api/status` sur une machine dont le
+ * DSN n'est pas encore connu le découvre au passage tandis que l'outil MCP équivalent renvoyait
+ * `dsn: null` pour toujours, faute de jamais déclencher la sonde.
+ */
+async function resolveMachineForTool(machineId) {
+  const { m, error } = pickMachine({ url: `/x${machineId ? `?machine=${machineId}` : ""}` });
+  if (!m) throw new Error(error);
+  if (!m.dsn) await resolveDsn(m);
+  return m;
+}
+
 /** Adresse source de la requête, débarrassée du préfixe IPv4-mappé d'IPv6. */
 const peerAddress = (req) => String(req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
 
@@ -4947,11 +4961,7 @@ function registerMcpTools(server, tokenRow) {
     name: "get_status", categorie: "statut", nature: "lecture",
     description: "État courant de la machine (statut d'un coup d'œil).",
     inputSchema: { machine: z.string().optional() },
-    run: async ({ machine } = {}) => {
-      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
-      if (!m) throw new Error(error);
-      return buildStatusPayload(m);
-    },
+    run: async ({ machine } = {}) => buildStatusPayload(await resolveMachineForTool(machine)),
   });
 
   defineMcpTool(server, tokenRow, {
@@ -4965,33 +4975,21 @@ function registerMcpTools(server, tokenRow) {
     name: "get_machine", categorie: "statut", nature: "lecture",
     description: "Fiche d'une machine précise (adresse, DSN, clé LAN présente ou non).",
     inputSchema: { machine: z.string().optional() },
-    run: async ({ machine } = {}) => {
-      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
-      if (!m) throw new Error(error);
-      return machineSummary(m);
-    },
+    run: async ({ machine } = {}) => machineSummary(await resolveMachineForTool(machine)),
   });
 
   defineMcpTool(server, tokenRow, {
     name: "get_system", categorie: "statut", nature: "lecture",
     description: "Propriétés système Ayla de la machine.",
     inputSchema: { machine: z.string().optional() },
-    run: async ({ machine } = {}) => {
-      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
-      if (!m) throw new Error(error);
-      return buildSystemPayload(m);
-    },
+    run: async ({ machine } = {}) => buildSystemPayload(await resolveMachineForTool(machine)),
   });
 
   defineMcpTool(server, tokenRow, {
     name: "get_stats", categorie: "statut", nature: "lecture",
     description: "Compteurs et statistiques brutes de la machine (paramètres 0xA2 0x0F et propriétés nommées).",
     inputSchema: { machine: z.string().optional() },
-    run: async ({ machine } = {}) => {
-      const { m, error } = pickMachine({ url: `/x${machine ? `?machine=${machine}` : ""}` });
-      if (!m) throw new Error(error);
-      return buildStatsPayload(m);
-    },
+    run: async ({ machine } = {}) => buildStatsPayload(await resolveMachineForTool(machine)),
   });
 
   defineMcpTool(server, tokenRow, {
