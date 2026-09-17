@@ -194,13 +194,19 @@ jobs:
       - name: Vérifier le reniflage d'une photo de grain
         run: node scripts/verif-datum-grains.mjs
 
-      - name: Vérifier le serveur MCP (catalogue, authentification, portée)
-        run: node scripts/verif-mcp.mjs
-
       - name: Build
         run: pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+
+      # ⚠️ **Cette étape vient APRÈS le build, pour la même raison structurelle que
+      # `verif-surfaces.mjs` ci-dessous** : elle lève un vrai `server.mjs` en mode production (sans
+      # `--dev`), qui sert `.next/`, pas les sources. Placée avec les vérifications pures — c'est là
+      # qu'elle était — le serveur de test ne répondait jamais (`.next/BUILD_ID` absent) et le script
+      # échouait au bout de 9 s sur un faux « le serveur de test ne répond pas », sans qu'aucun outil
+      # MCP ne soit en cause. Reproduit et corrigé après un premier run rouge sur `v0.1.1`.
+      - name: Vérifier le serveur MCP (catalogue, authentification, portée)
+        run: node scripts/verif-mcp.mjs
 
       # Les surfaces, dans un vrai navigateur — la seule chose que ni tsc, ni ESLint, ni les onze
       # vérifications pures ne regardent. Il existe pour la migration vers shadcn : le piège de
