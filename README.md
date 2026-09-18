@@ -1,7 +1,6 @@
 # De'Longhi LAN Server
 
 [![CI](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml)
-[![Validate](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/validate.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/validate.yml)
 
 Piloter une machine à café **De'Longhi ECAM** (gamme *Coffee Link*) **100 % en local**, sans passer
 par le cloud De'Longhi/Ayla : serveur Node.js + interface web, sur votre réseau, sans compte requis
