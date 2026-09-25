@@ -25,7 +25,7 @@ jobs:
     name: Types, syntaxe et build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # La version de pnpm vient du champ `packageManager` de package.json — pnpm 11, d'où le
       # majeur v6 de l'action, le premier à le connaître.
@@ -37,7 +37,7 @@ jobs:
       # sur quoi le build et les vérifications tournent réellement.
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: pnpm
@@ -340,7 +340,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # ⚠️ `github.repository` porte le nom de l'organisation TEL QU'IL EST ÉCRIT — ici
       # `FiveElements`. Docker refuse un nom de dépôt qui n'est pas entièrement en minuscules :
