@@ -1,7 +1,7 @@
-# De'Longhi LAN Server
+e # De'Longhi LAN Server
 
-[![CI](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/release/FiveElements/delonghi-coffeelink-local?label=version)](https://github.com/FiveElements/delonghi-coffeelink-local/releases/latest)
+[![CI](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/codeql.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/codeql.yml)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot)](https://github.com/FiveElements/delonghi-coffeelink-local/network/updates)
 
