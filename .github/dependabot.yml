@@ -1,0 +1,26 @@
+# Dependabot : mises à jour hebdomadaires, regroupées pour ne pas noyer la liste des PR. Chaque PR
+# passe par la CI complète (vérifications pures, build, surfaces dans Chrome, image Docker) — c'est
+# elle, et non Dependabot, qui dit si une mise à jour est sûre.
+version: 2
+updates:
+  - package-ecosystem: npm # couvre pnpm (pnpm-lock.yaml)
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      mineures:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

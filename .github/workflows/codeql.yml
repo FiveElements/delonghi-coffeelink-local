@@ -1,0 +1,41 @@
+# Analyse CodeQL : configuration « avancée » (un fichier) plutôt que la configuration par défaut de
+# GitHub, parce que seule la première expose un badge de workflow pour le README. Aucune étape de
+# build : JavaScript/TypeScript s'analysent sur les sources (`build-mode: none`), et `actions`
+# couvre les workflows eux-mêmes — ceux qui publient sur GHCR méritent d'être relus aussi.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "27 4 * * 1" # chaque lundi : de nouvelles requêtes arrivent sans nouveau commit
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyse (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # publier les résultats dans l'onglet Security
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
