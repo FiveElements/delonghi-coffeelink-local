@@ -1,0 +1,73 @@
+# Fusion automatique des PR Dependabot, dès que la CI est verte. C'est la CI qui dit si une mise à
+# jour est sûre (voir .github/dependabot.yml) ; ce workflow ne fait qu'en tirer la conséquence.
+#
+# Pourquoi `workflow_run` plutôt que l'auto-merge natif de GitHub : celui-ci n'attend que les
+# vérifications *requises*, et `main` n'en a aucune — il fusionnerait donc immédiatement, avant la
+# CI. Exiger des vérifications passerait par une protection de branche, qui bloquerait aussi les
+# poussées directes sur `main`. Ici, on fusionne APRÈS un succès constaté, sans rien changer aux
+# réglages du dépôt.
+#
+# ⚠️ Une fusion faite avec `GITHUB_TOKEN` ne déclenche AUCUN workflow `push` : la CI de `main` ne
+# tournerait pas et l'image `edge` ne serait jamais publiée. D'où les deux `gh workflow run` de la
+# fin — `workflow_dispatch` est la seule exception que GitHub accorde à ce jeton, et la CI publie
+# `edge` sur un dispatch de `main` comme sur un push.
+#
+# Rien du code de la PR n'est extrait ni exécuté ici : ce job a un jeton en écriture, il ne
+# manipule que des métadonnées via `gh`.
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write # fusionner
+  pull-requests: write # fusionner
+  actions: write # relancer CI et CodeQL sur main
+  checks: read # attendre les autres vérifications de la PR
+
+concurrency:
+  group: dependabot-auto-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Fusionner la PR Dependabot
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      BRANCHE: ${{ github.event.workflow_run.head_branch }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Retrouver la PR
+        id: pr
+        run: |
+          pr=$(gh pr list --head "$BRANCHE" --state open --json number,author \
+            --jq '.[] | select(.author.login == "app/dependabot" or .author.login == "dependabot[bot]") | .number')
+          if [ -z "$pr" ]; then echo "Aucune PR Dependabot ouverte sur $BRANCHE"; exit 0; fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+
+      # La CI est verte, mais CodeQL tourne à côté : on attend qu'elle ait conclu, et on s'arrête
+      # au premier échec.
+      - name: Attendre les autres vérifications
+        if: steps.pr.outputs.number
+        run: gh pr checks "${{ steps.pr.outputs.number }}" --watch --fail-fast --interval 30
+
+      # `--match-head-commit` : on ne fusionne que le commit que la CI vient de valider. Si
+      # Dependabot a rebasé entre-temps, la fusion est refusée et la prochaine CI s'en chargera.
+      - name: Fusionner
+        if: steps.pr.outputs.number
+        run: gh pr merge "${{ steps.pr.outputs.number }}" --squash --delete-branch --match-head-commit "$SHA"
+
+      - name: Relancer CI et CodeQL sur main
+        if: steps.pr.outputs.number
+        run: |
+          gh workflow run ci.yml --ref main
+          gh workflow run codeql.yml --ref main
