@@ -105,6 +105,7 @@ Each check is a standalone, dependency-free script. Running one script *is* "run
 node scripts/verif-tasks.mjs       # scheduler: ranks, preemption, sustain windows
 node scripts/verif-monitor.mjs     # monitor decoding, replayed on REAL captured frames
 node scripts/verif-lansession.mjs  # both LAN-session roles talking to each other
+node scripts/verif-proprietes.js   # fast-check: random frames never crash a decoder; LAN session round-trips any payload (.js on purpose: Scorecard Fuzzing)
 node scripts/verif-apps.mjs        # app registry + payload parsing
 node scripts/verif-args.mjs        # ECAM frame table / argument decoding (byte offsets)
 node scripts/verif-transfert.mjs   # writing a local recipe into a machine slot

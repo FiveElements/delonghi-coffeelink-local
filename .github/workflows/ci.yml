@@ -98,6 +98,13 @@ jobs:
       - name: Vérifier la session LAN dans les deux rôles
         run: node scripts/verif-lansession.mjs
 
+      # Par propriétés (fast-check) : des dizaines de milliers de trames AU HASARD dans les
+      # décodeurs, et des suites de charges quelconques dans la session LAN. Une graine nouvelle à
+      # chaque run ; en cas d'échec, elle est dans le log (`FC_SEED=… node scripts/verif-proprietes.js`).
+      # C'est aussi ce que Scorecard compte comme « Fuzzing » — d'où un `.js` (voir son en-tête).
+      - name: Vérifier par propriétés les décodeurs et la session LAN
+        run: node scripts/verif-proprietes.js
+
       - name: Vérifier le registre d'applications
         run: node scripts/verif-apps.mjs
 
