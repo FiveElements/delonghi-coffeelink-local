@@ -4,6 +4,6 @@
   "description": "pnpm pour l'image Docker, installé par `npm ci` : version ET empreinte figées par package-lock.json",
   "license": "GPL-3.0-only",
   "dependencies": {
-    "pnpm": "11.22.0"
+    "pnpm": "12.15.0"
   }
 }

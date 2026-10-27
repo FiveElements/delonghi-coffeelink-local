@@ -28,8 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # La version de pnpm vient du champ `packageManager` de package.json — pnpm 11, d'où le
-      # majeur v6 de l'action, le premier à le connaître.
+      # La version de pnpm vient du champ `packageManager` de package.json (pnpm 12 depuis
+      # 2026-10-27, à garder égal à docker/pnpm/) ; le majeur v6 de l'action est le premier à connaître pnpm 11+.
       #
       # ⚠️ Le `node24` que ces actions annoncent N'EST PAS la version de Node qui exécute le
       # projet : c'est le runtime dans lequel GitHub fait tourner l'ACTION elle-même, et il n'en

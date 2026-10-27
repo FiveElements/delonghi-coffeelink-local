@@ -19,8 +19,13 @@ RUN apk add --no-cache libc6-compat
 # installe donc pnpm par npm, qui est present dans l'image officielle. Par `npm ci` sur
 # docker/pnpm/ et non `npm install -g` : le lockfile fige la version (la meme que
 # `packageManager`) ET l'empreinte sha512 du paquet (Scorecard, Pinned-Dependencies).
+# ⚠️ Le `chmod` est nécessaire : le tarball de pnpm 12 ne porte plus le bit exécutable sur
+# `bin/pnpm.mjs`, et le lien seul rendait `pnpm: Permission denied` (exit 126).
+# ⚠️ docker/pnpm/ doit rester À LA VERSION de `packageManager` : sinon pnpm, lancé dans /app,
+# se remplace par celle de package.json en la TÉLÉCHARGEANT, sans empreinte.
 COPY docker/pnpm/ /opt/pnpm/
 RUN npm ci --prefix /opt/pnpm --ignore-scripts --no-audit --no-fund \
+ && chmod +x /opt/pnpm/node_modules/pnpm/bin/pnpm.mjs \
  && ln -s /opt/pnpm/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
  && pnpm --version
 WORKDIR /app
@@ -41,8 +46,13 @@ RUN apk add --no-cache libc6-compat
 # installe donc pnpm par npm, qui est present dans l'image officielle. Par `npm ci` sur
 # docker/pnpm/ et non `npm install -g` : le lockfile fige la version (la meme que
 # `packageManager`) ET l'empreinte sha512 du paquet (Scorecard, Pinned-Dependencies).
+# ⚠️ Le `chmod` est nécessaire : le tarball de pnpm 12 ne porte plus le bit exécutable sur
+# `bin/pnpm.mjs`, et le lien seul rendait `pnpm: Permission denied` (exit 126).
+# ⚠️ docker/pnpm/ doit rester À LA VERSION de `packageManager` : sinon pnpm, lancé dans /app,
+# se remplace par celle de package.json en la TÉLÉCHARGEANT, sans empreinte.
 COPY docker/pnpm/ /opt/pnpm/
 RUN npm ci --prefix /opt/pnpm --ignore-scripts --no-audit --no-fund \
+ && chmod +x /opt/pnpm/node_modules/pnpm/bin/pnpm.mjs \
  && ln -s /opt/pnpm/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
  && pnpm --version
 WORKDIR /app
