@@ -37,9 +37,8 @@ const CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 export function randomToken(n: number): string {
-  const b = crypto.randomBytes(n);
   let s = "";
-  for (let i = 0; i < n; i++) s += CHARS[b[i] % 62];
+  for (let i = 0; i < n; i++) s += CHARS[crypto.randomInt(CHARS.length)];
   return s;
 }
 

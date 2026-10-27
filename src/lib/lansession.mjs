@@ -43,11 +43,14 @@ const hmac = (k, d) => crypto.createHmac("sha256", k).update(d).digest();
 export const derive = (K, seed) => hmac(K, Buffer.concat([hmac(K, seed), seed]));
 
 const CH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-/** Aléa alphanumérique, comme l'app : le protocole transporte ces valeurs en TEXTE, pas en octets. */
+/**
+ * Aléa alphanumérique, comme l'app : le protocole transporte ces valeurs en TEXTE, pas en octets.
+ * `randomInt` et non `randomBytes() % 62` : 256 n'est pas un multiple de 62, le modulo favorisait
+ * les huit premiers caractères (alerte CodeQL `js/biased-cryptographic-random`).
+ */
 export const token = (n) => {
-  const b = crypto.randomBytes(n);
   let s = "";
-  for (let i = 0; i < n; i++) s += CH[b[i] % 62];
+  for (let i = 0; i < n; i++) s += CH[crypto.randomInt(CH.length)];
   return s;
 };
 

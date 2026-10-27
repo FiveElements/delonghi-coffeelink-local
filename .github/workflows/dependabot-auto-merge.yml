@@ -21,11 +21,8 @@ on:
     workflows: [CI]
     types: [completed]
 
-permissions:
-  contents: write # fusionner
-  pull-requests: write # fusionner
-  actions: write # relancer CI et CodeQL sur main
-  checks: read # attendre les autres vérifications de la PR
+# Rien au niveau global : les droits vivent sur le seul job (Scorecard, Token-Permissions).
+permissions: {}
 
 concurrency:
   group: dependabot-auto-merge
@@ -35,6 +32,11 @@ jobs:
   merge:
     name: Fusionner la PR Dependabot
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # fusionner
+      pull-requests: write # fusionner
+      actions: write # relancer CI et CodeQL sur main
+      checks: read # attendre les autres vérifications de la PR
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request' &&

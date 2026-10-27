@@ -16,16 +16,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Lecture seule au niveau global : l'écriture n'est accordée qu'au job qui en a besoin (Scorecard,
+# Token-Permissions). Un pas compromis de `verify` ne peut donc pas pousser d'image.
 permissions:
   contents: read
-  packages: write # publier l'image `edge` apres un test reussi
 
 jobs:
   verify:
     name: Types, syntaxe et build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # La version de pnpm vient du champ `packageManager` de package.json — pnpm 11, d'où le
       # majeur v6 de l'action, le premier à le connaître.
@@ -35,9 +36,9 @@ jobs:
       # propose que deux — node20, qu'il déprécie, et node24. Il n'existe pas de runtime node26.
       # Notre cible Node 26 est celle de `setup-node` juste en dessous, et c'est elle qui décide
       # sur quoi le build et les vérifications tournent réellement.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: pnpm
@@ -358,7 +359,7 @@ jobs:
           --include server.mjs --include 'src/lib/**/*.mjs'
 
       # Pas de jeton sur une PR venue d'un fork : l'envoi échoue alors sans faire rougir la CI.
-      - uses: codecov/codecov-action@v7
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: ${{ !cancelled() }}
         with:
           files: coverage/lcov.info
@@ -368,10 +369,13 @@ jobs:
   docker:
     name: Image Docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # publier l'image `edge` apres un test reussi
     env:
       IMAGE: ghcr.io/${{ github.repository }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # ⚠️ `github.repository` porte le nom de l'organisation TEL QU'IL EST ÉCRIT — ici
       # `FiveElements`. Docker refuse un nom de dépôt qui n'est pas entièrement en minuscules :
@@ -382,12 +386,12 @@ jobs:
       - name: Le nom de l'image, en minuscules
         run: echo "IMAGE=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Construite pour l'architecture du runner seulement : la CI vérifie que l'image se
       # construit et démarre. Le multi-architecture est l'affaire du workflow de release.
       - name: Construire l'image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
@@ -418,8 +422,11 @@ jobs:
             console.log('le serveur répond, port', d.config.serverPort);
           "
           echo "--- /api/system : le stockage doit annoncer SQLite ---"
-          curl -fsS http://127.0.0.1:3000/api/system | node -e "
-            const d = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+          # Un fichier et non un tube `curl | node` : Scorecard lit ce dernier comme un
+          # « télécharger puis exécuter » (Pinned-Dependencies), alors qu'on ne lit que du JSON.
+          curl -fsS -o /tmp/system.json http://127.0.0.1:3000/api/system
+          node -e "
+            const d = require('/tmp/system.json');
             if (d.storage?.engine !== 'sqlite') throw new Error('moteur de stockage inattendu : ' + JSON.stringify(d.storage));
             console.log('stockage', d.storage.engine, d.storage.sqliteVersion, '· journal', d.storage.journalMode);
           "
@@ -477,7 +484,7 @@ jobs:
       # Sans cette étape, aucune image n'existerait sur GHCR avant la première étiquette `v*`.
       - name: Se connecter à GHCR
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -485,7 +492,7 @@ jobs:
 
       - name: Publier l'image edge
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true

@@ -25,7 +25,7 @@ const MODE = process.env.KDF || "single";
 const derive = (K, seed) =>
   MODE === "double" ? hmac(K, Buffer.concat([hmac(K, seed), seed])) : hmac(K, seed);
 const CH = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-const token = (n) => { const b = crypto.randomBytes(n); let s = ""; for (let i = 0; i < n; i++) s += CH[b[i] % 62]; return s; };
+const token = (n) => { let s = ""; for (let i = 0; i < n; i++) s += CH[crypto.randomInt(CH.length)]; return s; };
 
 let session = null;
 

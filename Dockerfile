@@ -9,14 +9,20 @@
 # les dépendances de production dans l'image — plus gros, mais sans zone d'ombre.
 
 # ------------------------------------------------------------------ dépendances (dev incluses)
+# Image épinglée par empreinte (index multi-architecture) : Dependabot (écosystème docker) la
+# fait avancer, l'étiquette `26-alpine` restant lisible devant le @sha256.
 # TypeScript et les types sont nécessaires au build : NODE_ENV reste vide ici, sinon pnpm sauterait
 # les devDependencies.
-FROM node:26-alpine AS deps
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
 RUN apk add --no-cache libc6-compat
 # Node ne livre plus corepack depuis la version 25 — `corepack: not found`, exit 127. On
-# installe donc pnpm par npm, qui est present dans l'image officielle. Version figee, la
-# meme que `packageManager` dans package.json.
-RUN npm install -g pnpm@11.22.0
+# installe donc pnpm par npm, qui est present dans l'image officielle. Par `npm ci` sur
+# docker/pnpm/ et non `npm install -g` : le lockfile fige la version (la meme que
+# `packageManager`) ET l'empreinte sha512 du paquet (Scorecard, Pinned-Dependencies).
+COPY docker/pnpm/ /opt/pnpm/
+RUN npm ci --prefix /opt/pnpm --ignore-scripts --no-audit --no-fund \
+ && ln -s /opt/pnpm/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
+ && pnpm --version
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -29,18 +35,22 @@ COPY . .
 RUN pnpm build
 
 # ------------------------------------------------------------------ dépendances de production
-FROM node:26-alpine AS prod-deps
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS prod-deps
 RUN apk add --no-cache libc6-compat
 # Node ne livre plus corepack depuis la version 25 — `corepack: not found`, exit 127. On
-# installe donc pnpm par npm, qui est present dans l'image officielle. Version figee, la
-# meme que `packageManager` dans package.json.
-RUN npm install -g pnpm@11.22.0
+# installe donc pnpm par npm, qui est present dans l'image officielle. Par `npm ci` sur
+# docker/pnpm/ et non `npm install -g` : le lockfile fige la version (la meme que
+# `packageManager`) ET l'empreinte sha512 du paquet (Scorecard, Pinned-Dependencies).
+COPY docker/pnpm/ /opt/pnpm/
+RUN npm ci --prefix /opt/pnpm --ignore-scripts --no-audit --no-fund \
+ && ln -s /opt/pnpm/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
+ && pnpm --version
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 # ------------------------------------------------------------------ image finale
-FROM node:26-alpine AS runtime
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 

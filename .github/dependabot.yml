@@ -12,6 +12,12 @@ updates:
       mineures:
         update-types: [minor, patch]
 
+  # pnpm de l'image Docker, figé par docker/pnpm/package-lock.json (installé par `npm ci`).
+  - package-ecosystem: npm
+    directory: /docker/pnpm
+    schedule:
+      interval: weekly
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
