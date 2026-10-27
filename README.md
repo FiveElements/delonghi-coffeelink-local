@@ -1,4 +1,4 @@
-e # De'Longhi LAN Server
+# De'Longhi LAN Server
 
 [![Version](https://img.shields.io/github/v/release/FiveElements/delonghi-coffeelink-local?label=version)](https://github.com/FiveElements/delonghi-coffeelink-local/releases/latest)
 [![CI](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml)
