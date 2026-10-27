@@ -83,7 +83,7 @@ and a failure is reported as a failure — never as a fake success.
 
 ## Commands
 
-Node **≥ 26** (the store uses native `node:sqlite`), pnpm 11 (pinned by `packageManager`).
+Node **≥ 26** (the store uses native `node:sqlite`), pnpm 12 (pinned by `packageManager`, and `docker/pnpm/` must carry the same version).
 
 ```bash
 pnpm install
