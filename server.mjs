@@ -1646,8 +1646,12 @@ async function sonderAppSerialise(m, app) {
     // Même cause que le cas `illisible` plus bas — un flux perdu — mais détectée un cran plus
     // tôt, quand c'est le déchiffrement lui-même qui refuse (remplissage invalide). On
     // journalisait et on repartait sonder sans jamais rouvrir la session.
+    // Depuis que `decapsulate` vérifie la signature, c'est AUSSI ici qu'arrive le bloc qui
+    // tombait dans `illisible` : un message sauté abîme le suivant, et sa signature ne
+    // correspond plus. `e.clair` garde la charge non authentifiée — la preuve, lue à l'œil.
     noterSondage(m, app, `HTTP ${rep.status}, ${rep.corps.length} o — indéchiffrable`);
-    LA("in", "commandes", `bloc de commandes indéchiffrable (${e.message}) · ${chargeBrute(rep.corps, 96)}`, app, m);
+    const preuve = e.clair !== undefined ? `clair non authentifié : ${String(e.clair).slice(0, 200)}` : chargeBrute(rep.corps, 96);
+    LA("in", "commandes", `bloc de commandes indéchiffrable (${e.message}) · ${preuve}`, app, m);
     relancerSessionApp(m, app, "déchiffrement refusé");
     return false;
   }

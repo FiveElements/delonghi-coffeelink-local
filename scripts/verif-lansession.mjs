@@ -98,7 +98,10 @@ test("le numéro de séquence s'incrémente", () => {
   }
 });
 
-console.log("\n— le sens compte, et se tromper ne lève AUCUNE erreur —");
+// Le titre disait « ne lève AUCUNE erreur » : c'était vrai tant que `decapsulate` ne vérifiait pas la
+// signature. Depuis, se tromper de sens est REFUSÉ — mais le piège demeure : un refus de signature
+// ne dit pas qu'on s'est trompé de rôle.
+console.log("\n— le sens compte —");
 
 test("deux appareils ne se comprennent pas", () => {
   // Le piège que ce fichier existe pour attraper : si le proxy prenait le rôle « client » au lieu
@@ -142,6 +145,47 @@ test("la dérivation est bien un DOUBLE HMAC", () => {
   if (!derive(K, s).equals(attendu)) throw new Error("la dérivation n'est pas le double HMAC attendu");
 });
 
+/** Exige un refus de signature et rend le clair non authentifié qu'il transporte. */
+const refus = (fn, quoi) => {
+  try {
+    fn();
+  } catch (e) {
+    if (!/signature/.test(e.message) || typeof e.clair !== "string") throw new Error(`${quoi} : refus inattendu — ${e.message}`, { cause: e });
+    return e.clair;
+  }
+  throw new Error(`${quoi} : accepté sans signature valide`);
+};
+
+console.log("\n— la signature est vérifiée, comme dans le SDK —");
+
+test("une signature altérée est refusée, et le flux reste aligné", () => {
+  // Le déchiffrement a lieu AVANT le contrôle : un message refusé est quand même consommé, sans
+  // quoi le suivant serait lu avec un chaînage faux et refusé à son tour.
+  const { appareil, client } = paire(echange());
+  const faux = JSON.parse(appareil.encapsulate('{"commande":"on"}'));
+  const sign = Buffer.from(faux.sign, "base64");
+  sign[0] ^= 1;
+  faux.sign = sign.toString("base64");
+  eq(refus(() => client.decapsulate(faux), "signature altérée"), '{"seq_no":0,"data":{"commande":"on"}}', "clair conservé");
+  eq(JSON.parse(client.decapsulate(JSON.parse(appareil.encapsulate('{"ok":1}')))).data, { ok: 1 }, "message suivant");
+});
+
+test("une signature absente est refusée", () => {
+  const { appareil, client } = paire(echange());
+  const { enc } = JSON.parse(appareil.encapsulate("{}"));
+  refus(() => client.decapsulate({ enc }), "sans sign");
+});
+
+test("une charge modifiée sous sa signature d'origine est refusée", () => {
+  // Le cas qui motive le contrôle : le CBC ne protège pas l'intégrité — retourner un bit du
+  // chiffré change le clair sans que rien ne casse. Seule la signature le voit.
+  const { appareil, client } = paire(echange());
+  const msg = JSON.parse(appareil.encapsulate('{"profil":1,"remplissage":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'));
+  const enc = Buffer.from(msg.enc, "base64");
+  enc[20] ^= 0x01;
+  refus(() => client.decapsulate({ enc: enc.toString("base64"), sign: msg.sign }), "charge modifiée");
+});
+
 console.log("\n— ce que coûte un message SAUTÉ, exactement —");
 
 // Les helpers existants suffisent : l'application chiffre dans le rôle « appareil » (c'est nous
@@ -157,6 +201,9 @@ test("sauter un message n'en abîme QU'UN, puis le flux se recale seul", () => {
   // La conséquence pratique est ce qui rendait le diagnostic faux : **un seul « bloc illisible »
   // au journal ne veut pas dire « un incident isolé », il veut dire « exactement un message a
   // disparu juste avant ».
+  //
+  // Depuis que `decapsulate` vérifie la signature, le message abîmé est REFUSÉ — et c'est
+  // `e.clair` qui garde le charabia : la preuve ne disparaît pas avec le refus.
   const [app, srv] = deuxBouts();
   const msgs = [];
   for (let i = 1; i <= 5; i++) msgs.push(app.encapsulate(JSON.stringify({ n: i })));
@@ -164,7 +211,7 @@ test("sauter un message n'en abîme QU'UN, puis le flux se recale seul", () => {
 
   eq(lu(0), '{"seq_no":0,"data":{"n":1}}', "le premier message");
   // On saute le deuxième — ce que faisait `rep.status !== 200` sur une réponse 206.
-  const abime = lu(2);
+  const abime = refus(() => lu(2), "le message qui suit un saut");
   if (abime === '{"seq_no":2,"data":{"n":3}}') throw new Error("le saut n'a rien abîmé : le flux n'est pas persistant");
   if (!abime.endsWith('"n":3}}')) throw new Error(`la QUEUE devrait rester lisible, obtenu ${JSON.stringify(abime)}`);
   eq(lu(3), '{"seq_no":3,"data":{"n":4}}', "le message suivant est PARFAIT : le flux s'est recalé");
@@ -188,7 +235,7 @@ test("le charabia s'arrête au premier bloc, pas un octet de plus", () => {
 
   const sain = [0, 1, 2].map((i) => aligne.decapsulate(JSON.parse(m[i])))[2];
   decale.decapsulate(JSON.parse(m[0]));                                    // le 1 est lu
-  const abime = decale.decapsulate(JSON.parse(m[2]));                      // le 2 est sauté
+  const abime = refus(() => decale.decapsulate(JSON.parse(m[2])), "le 3e"); // le 2 est sauté
 
   // Comparaison sur les CHAÎNES et non sur des octets : le charabia n'étant pas de l'UTF-8, il
   // ressort en caractères de remplacement et la longueur en octets n'a plus de sens. Ce qui compte

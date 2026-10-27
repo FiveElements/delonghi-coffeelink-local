@@ -119,12 +119,31 @@ export function makeLanSession({ lanKey, random1, random2, time1, time2, role })
       ib.copy(pad, 0);
       return JSON.stringify({ enc: e.update(pad).toString("base64"), sign });
     },
-    /** Déchiffre un corps `{enc, sign}` et rend le JSON intérieur, remplissage retiré. */
+    /**
+     * Déchiffre un corps `{enc, sign}` et rend le JSON intérieur, remplissage retiré — **après
+     * avoir vérifié `sign`**, comme le fait le SDK (`AylaLanMessage` : HMAC de la clé de signature
+     * entrante sur le clair sans remplissage, « Message signature does not match » sinon). Ce
+     * port l'avait omis : n'importe quel corps déchiffrable passait pour authentique.
+     *
+     * ⚠️ Le déchiffrement a lieu AVANT le contrôle, et c'est voulu : le flux CBC est persistant,
+     * donc ne pas consommer un message refusé décalerait tous les suivants. Le refus porte le
+     * clair non authentifié dans `e.clair` — c'est la seule preuve de ce qui est arrivé (un
+     * message sauté se lit à l'œil : charabia sur 16 octets, queue intacte), et le journal la
+     * conserve.
+     */
     decapsulate(body) {
       const p = d.update(Buffer.from(body.enc, "base64"));
       let end = p.length;
       while (end > 0 && p[end - 1] === 0) end--;
-      return p.subarray(0, end).toString("utf8");
+      const clair = p.subarray(0, end);
+      const attendue = crypto.createHmac("sha256", entrant.sign).update(clair).digest();
+      const recue = Buffer.from(String(body.sign ?? ""), "base64");
+      if (recue.length !== attendue.length || !crypto.timingSafeEqual(recue, attendue)) {
+        const e = new Error(body.sign ? "signature HMAC invalide" : "signature absente");
+        e.clair = clair.toString("utf8");
+        throw e;
+      }
+      return clair.toString("utf8");
     },
   };
 }
