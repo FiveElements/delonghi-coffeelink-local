@@ -77,6 +77,14 @@ jobs:
       # possible.
       # `verif-monitor` rejoue des trames RÉELLES capturées pendant trois préparations : c'est le
       # seul endroit du projet où du comportement d'appareil est figé et rejouable.
+      #
+      # Couverture : la couverture V8 native de Node, sans instrumenter quoi que ce soit — chaque
+      # processus (enfants compris : `verif-surfaces` lève un vrai `server.mjs`) écrit ses compteurs
+      # dans NODE_V8_COVERAGE, et `c8 report` les agrège en fin de job. Coupée pendant le build :
+      # Next n'est pas notre code, et la tracer ne ferait que ralentir l'étape la plus longue.
+      - name: Activer la couverture V8
+        run: echo "NODE_V8_COVERAGE=${{ github.workspace }}/coverage/tmp" >> "$GITHUB_ENV"
+
       - name: Vérifier l'ordonnanceur de tâches
         run: node scripts/verif-tasks.mjs
 
@@ -194,10 +202,12 @@ jobs:
       - name: Vérifier le reniflage d'une photo de grain
         run: node scripts/verif-datum-grains.mjs
 
+      # Une variable vide désactive la couverture : Node ne la lit que si elle est non vide.
       - name: Build
         run: pnpm build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          NODE_V8_COVERAGE: ""
 
       # ⚠️ **Cette étape vient APRÈS le build, pour la même raison structurelle que
       # `verif-surfaces.mjs` ci-dessous** : elle lève un vrai `server.mjs` en mode production (sans
@@ -333,6 +343,27 @@ jobs:
             if (S.listMcpTokens().length !== 0) throw new Error('table des jetons MCP absente apres migration');
             console.log('pas v2 → v3 → v4 OK');
           "
+
+      # Le périmètre est celui du code qui tourne vraiment : `server.mjs` et les modules `.mjs` de
+      # `src/lib`. Les `.ts` de `src/lib` et les routes `src/app/api` sont masqués à l'exécution
+      # (voir CLAUDE.md) — les compter ferait baisser le chiffre pour du code mort. `--all` compte
+      # aussi les modules qu'aucune vérification ne charge, à zéro : c'est le chiffre honnête.
+      - name: Rapport de couverture
+        if: ${{ !cancelled() }}
+        env:
+          NODE_V8_COVERAGE: ""
+        run: >-
+          node_modules/.bin/c8 report --temp-directory coverage/tmp --reports-dir coverage
+          --reporter=lcov --reporter=text-summary --all --src .
+          --include server.mjs --include 'src/lib/**/*.mjs'
+
+      # Pas de jeton sur une PR venue d'un fork : l'envoi échoue alors sans faire rougir la CI.
+      - uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() }}
+        with:
+          files: coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   docker:
     name: Image Docker

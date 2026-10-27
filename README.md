@@ -4,6 +4,11 @@
 [![CI](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/codeql.yml/badge.svg)](https://github.com/FiveElements/delonghi-coffeelink-local/actions/workflows/codeql.yml)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot)](https://github.com/FiveElements/delonghi-coffeelink-local/network/updates)
+[![CVE alerts](https://img.shields.io/badge/CVE%20alerts-Dependabot-025e8c?logo=githubactions&logoColor=white)](https://github.com/FiveElements/delonghi-coffeelink-local/security/dependabot)
+[![Coverage](https://codecov.io/gh/FiveElements/delonghi-coffeelink-local/graph/badge.svg)](https://codecov.io/gh/FiveElements/delonghi-coffeelink-local)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/FiveElements/delonghi-coffeelink-local/badge)](https://scorecard.dev/viewer/?uri=github.com/FiveElements/delonghi-coffeelink-local)
+[![Licence](https://img.shields.io/github/license/FiveElements/delonghi-coffeelink-local?label=licence)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/FiveElements/delonghi-coffeelink-local/total?label=t%C3%A9l%C3%A9chargements)](https://github.com/FiveElements/delonghi-coffeelink-local/releases)
 
 Piloter une machine à café **De'Longhi ECAM** (gamme *Coffee Link*) **100 % en local**, sans passer
 par le cloud De'Longhi/Ayla : serveur Node.js + interface web, sur votre réseau, sans compte requis
@@ -299,5 +304,7 @@ Restent **10 modèles pleinement servis** : 5 PD_SOUL (28 boissons, 5 profils) e
 
 ## Licence
 
-Aucune licence n'est encore déclarée : par défaut, tous droits réservés. Si vous souhaitez réutiliser
-ce travail, ouvrez une discussion.
+[GNU GPL v3](LICENSE) (`GPL-3.0-only`) : vous pouvez utiliser, modifier et redistribuer ce code, à
+condition que toute version redistribuée reste sous la même licence, sources comprises. Les visuels
+De'Longhi de `public/boissons/` et `public/grains/` ne sont pas couverts : ils restent la propriété
+de De'Longhi.
