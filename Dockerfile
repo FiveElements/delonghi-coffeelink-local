@@ -13,7 +13,7 @@
 # fait avancer, l'étiquette `26-alpine` restant lisible devant le @sha256.
 # TypeScript et les types sont nécessaires au build : NODE_ENV reste vide ici, sinon pnpm sauterait
 # les devDependencies.
-FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS deps
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS deps
 RUN apk add --no-cache libc6-compat
 # Node ne livre plus corepack depuis la version 25 — `corepack: not found`, exit 127. On
 # installe donc pnpm par npm, qui est present dans l'image officielle. Par `npm ci` sur
@@ -40,7 +40,7 @@ COPY . .
 RUN pnpm build
 
 # ------------------------------------------------------------------ dépendances de production
-FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS prod-deps
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS prod-deps
 RUN apk add --no-cache libc6-compat
 # Node ne livre plus corepack depuis la version 25 — `corepack: not found`, exit 127. On
 # installe donc pnpm par npm, qui est present dans l'image officielle. Par `npm ci` sur
@@ -60,7 +60,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 
 # ------------------------------------------------------------------ image finale
-FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS runtime
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
