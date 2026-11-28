@@ -1,7 +1,7 @@
 /**
  * Configuration i18n — une seule langue pour l'instant (français).
  *
- * Pas de préfixe de locale dans l'URL, volontairement : `server.mjs` intercepte `/api/*` et
+ * Pas de préfixe de locale dans l'URL, volontairement : `server.ts` intercepte `/api/*` et
  * `/local_lan/*` avant Next, et introduire un segment `[locale]` déplacerait toutes les pages
  * (`/fr/profils`…) pour aucun bénéfice tant qu'il n'y a qu'une langue. Quand une deuxième
  * langue arrivera, deux options resteront ouvertes : négociation par en-tête `Accept-Language`

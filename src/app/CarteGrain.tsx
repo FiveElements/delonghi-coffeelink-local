@@ -42,7 +42,7 @@ import { Card } from "@/ui/card";
  * qui n'est pas devant est `inert` **et** `aria-hidden` : sans le premier, le clavier traverse une
  * face invisible ; sans le second, un lecteur d'écran lit la carte deux fois. `backface-visibility`
  * ne cache qu'à l'œil, et c'est exactement le genre de défaut qu'aucun outil de compilation ne voit
- * — `scripts/verif-surfaces.mjs` le vérifie dans un vrai navigateur.
+ * — `scripts/verif-surfaces.ts` le vérifie dans un vrai navigateur.
  *
  * **Le dos s'ouvre sur la MÊME photo, au même endroit.** Le formulaire commence par le cadre de
  * l'affiche, devenu cliquable (`PhotoGrains`, qui monte le même `AfficheGrain`) : la rotation ne

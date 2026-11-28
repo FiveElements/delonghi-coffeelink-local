@@ -43,7 +43,7 @@ export interface Decoded {
  *
  * `source` dit d'où vient l'index : `"sync"` = le mot 4 de `d260_beansystem_sync_par`, une seule
  * lecture de propriété ; `"flag"` = le drapeau de l'octet 50 d'une trame `0xBA`, qui exige un
- * balayage de tous les index. Voir `activeBeanSystem` dans `server.mjs`.
+ * balayage de tous les index. Voir `activeBeanSystem` dans `server.ts`.
  *
  * `name` et les trois réglages peuvent être `null` alors que `index` est connu : ils ne viennent
  * que du balayage `0xBA`, qui n'a peut-être pas encore eu lieu pour cet index. L'interface doit

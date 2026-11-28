@@ -1320,7 +1320,7 @@ ol.listeFavoris > li:last-child { border-bottom: 0; }
    une rangée, et l'œil qui descend une colonne n'a plus de repère. Deux choses la condamnent en
    plus : les deux états SANS photo (dessin de torréfaction, initiales) ont besoin d'un cadre de
    forme fixe de toute façon, et ce sont eux le cas majoritaire ; et la bande ne concerne que le
-   format ÉTRANGER, celui dont l'en-tête de `image-grains.mjs` documente déjà les trois défauts. */
+   format ÉTRANGER, celui dont l'en-tête de `image-grains.ts` documente déjà les trois défauts. */
 .afficheGrain .afficheGrainPhoto { display: block; width: 100%; height: 100%; object-fit: contain; }
 /* Le dessin de torréfaction s'INSCRIT plus petit encore : c'est une illustration sur fond
    transparent, pas un objet cadré — la mettre bord à bord lui donnerait le poids d'une photo. */
@@ -1553,7 +1553,7 @@ ol.listeFavoris > li:last-child { border-bottom: 0; }
    au hasard dirait « voici ce que la machine autorise », et ce serait faux.
 
    Le sélecteur a suivi le nœud : `input[type="range"]` est devenu la piste de Radix. C'est la
-   seule chose qui change ici, et c'est ce que `verif-surfaces.mjs` vérifie — il cherche la
+   seule chose qui change ici, et c'est ce que `verif-surfaces.ts` vérifie — il cherche la
    propriété, jamais le sélecteur qui la portait hier. */
 [style*="--crans"] [data-slot="slider-track"] {
   background-image: repeating-linear-gradient(
@@ -1917,7 +1917,7 @@ button.danger.discret { color: var(--danger-text); }
    Écrite `.photoAffiche`, cette règle aurait perdu son `padding: 0` en silence, et le cadre du dos
    aurait fait 28 px de moins que l'affiche de la face avant — mesuré : 322 px contre 350, soit une
    image qui se décale de 14 px au milieu du demi-tour. C'est la précaution que `input.photoInput`
-   prend plus bas, pour exactement la même raison, et c'est `verif-surfaces.mjs` qui l'a attrapée
+   prend plus bas, pour exactement la même raison, et c'est `verif-surfaces.ts` qui l'a attrapée
    (§ « le dos ouvre sur le même cadre que l'affiche »).
 
    **Ce qui est gardé de la règle générique, en revanche, l'est exprès** : la transition et
@@ -2023,7 +2023,7 @@ button.photoAffiche:not([data-slot]):disabled { cursor: not-allowed; }
      grilles distinctes : `auto` se dimensionne alors sur le contenu de CHACUNE, et la cellule de
      fin — vide dans l'en-tete, un chevron dans une ligne — donnait 0 px d'un cote et 14 px de
      l'autre. Les quatre premieres colonnes restaient alignees, la cinquieme decalait le resume de
-     dix pixels d'une rangee a l'autre. Mesure prise au navigateur, dans `verif-surfaces.mjs`.
+     dix pixels d'une rangee a l'autre. Mesure prise au navigateur, dans `verif-surfaces.ts`.
 
      La colonne du SENS fait 2,6 rem et non la largeur de son glyphe : l'en-tete y ecrit « SENS »,
      en capitales espacees de `--suivi-legende`, ce qui vaut ~36 px. Dimensionnee sur l'icone, elle

@@ -32,7 +32,7 @@ import { type Geste, confirmRequis, setConfirmRequis } from "./confirmPrefs";
  * garanties viennent de `@radix-ui/react-dialog` — c'est-à-dire du code, plus de la plateforme. La
  * différence n'est pas théorique sur l'écran qui protège d'une action physique, donc :
  *
- * - `scripts/verif-surfaces.mjs` les vérifie une par une dans un vrai navigateur, et il a été
+ * - `scripts/verif-surfaces.ts` les vérifie une par une dans un vrai navigateur, et il a été
  *   écrit **avant** cette migration pour capturer ce que le natif faisait ;
  * - le focus initial est **imposé** sur « Annuler ». Radix pose le focus sur le premier élément
  *   focusable du contenu, ce qui n'est PAS la même promesse : la garantie qui compte ici est que la

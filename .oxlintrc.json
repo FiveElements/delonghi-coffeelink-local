@@ -4,7 +4,7 @@
 // `typescript-eslint`. Or celui-ci appelle l'API classique du compilateur, que TypeScript 7 (le
 // portage natif) n'exporte plus (`createSourceFile`, `SyntaxKind`… absents), et sa plage de pairs
 // exclut 7. Sous ESLint, les `.ts`/`.tsx` étaient donc STRUCTURELLEMENT hors de portée et seuls
-// les `.mjs` étaient lintés. Ici tout le dépôt l'est — `.mjs`, `.js`, `.ts`, `.tsx` — et
+// les `.mjs` étaient lintés. Ici tout le dépôt l'est — `.ts`, `.tsx`, `.js` — et
 // `react-hooks` (rules-of-hooks, exhaustive-deps) s'applique enfin aux pages.
 //
 // Les commentaires d'exception s'écrivent `// oxlint-disable-next-line <règle>`.
@@ -20,7 +20,7 @@
     "out/**",
     // Outillage local de l'éditeur, hors dépôt.
     ".claude/**",
-    // Sorties extraites de l'APK : régénérées par `scripts/extract-*.mjs`, jamais éditées à la main.
+    // Sorties extraites de l'APK : régénérées par `scripts/extract-*.ts`, jamais éditées à la main.
     "src/lib/machine-catalogs.json",
     "src/lib/machine-models.json"
   ],
@@ -35,12 +35,13 @@
     // `catch {}` vide est délibéré (« au mieux » : fermer une base, tenter un ROLLBACK…). Un `if`
     // ou une boucle vides restent des fautes.
     "no-empty": ["error", { "allowEmptyCatch": true }],
-    // Hors catégorie `correctness` chez oxlint, mais c'est ce qu'ESLint attrapait dans les `.mjs`,
-    // que `tsc` ne voit pas. Coupée pour `.ts`/`.tsx` plus bas : `tsc` le fait mieux.
+    // Hors catégorie `correctness` chez oxlint, mais c'est ce qu'ESLint attrapait dans les `.mjs`.
+    // Ne vise plus que le `.js` restant, que `tsc` ne voit pas. Coupée pour `.ts`/`.tsx`
+    // plus bas : `tsc` le fait mieux.
     "no-undef": "error",
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "error",
-    // `new Array(n).fill(0)` est l'idiome des constructeurs de trames (`server.mjs`) :
+    // `new Array(n).fill(0)` est l'idiome des constructeurs de trames (`server.ts`) :
     // `n` y est toujours un entier calculé, l'ambiguïté que la règle redoute n'existe pas.
     "unicorn/no-new-array": "off",
     // Les trois suivantes sont des règles du React Compiler, que ce projet n'active pas. Elles
@@ -63,7 +64,7 @@
       // Fichier Node qui contient du code de NAVIGATEUR : les rappels de `page.evaluate()` sont
       // sérialisés et exécutés dans l'onglet. Pour ce seul fichier — ailleurs dans `scripts/`, un
       // `document` serait une vraie faute.
-      "files": ["scripts/verif-surfaces.mjs"],
+      "files": ["scripts/verif-surfaces.ts"],
       "env": { "browser": true }
     }
   ]

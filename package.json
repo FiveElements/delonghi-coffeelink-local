@@ -2,6 +2,7 @@
   "name": "delonghi-lan-server",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "license": "GPL-3.0-only",
   "description": "Serveur LAN mode Ayla + interfaces web pour piloter une De'Longhi ECAM (Coffee Link)",
   "engines": {
@@ -9,11 +10,11 @@
   },
   "packageManager": "pnpm@12.23.0+sha512.02da94ffaf133f46074322afe552f90d40b5f71ae259aefbccdacc5085b1d617e98d65e0131f5748b9b67445978ee5055d7d59a473f1eef0d504854fefcd5975",
   "scripts": {
-    "dev": "node server.mjs --dev",
+    "dev": "node server.ts --dev",
     "dev:next-only": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "start": "node server.mjs",
-    "serve": "node server.mjs",
+    "start": "node server.ts",
+    "serve": "node server.ts",
     "lint": "oxlint --deny-warnings"
   },
   "dependencies": {

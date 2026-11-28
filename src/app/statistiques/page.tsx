@@ -44,7 +44,7 @@ interface SyncBlock {
 
 /**
  * Un compteur **nommé** : le second canal de statistiques, celui des propriétés Ayla (voir
- * `src/lib/compteurs.mjs`). Il ne vient pas du balayage `0xA2` mais d'une propriété dont le nom dit
+ * `src/lib/compteurs.ts`). Il ne vient pas du balayage `0xA2` mais d'une propriété dont le nom dit
  * ce qu'elle compte.
  *
  * `key` **ou** `slug`, jamais les deux : un compteur de catégorie s'étiquette par une clé de
@@ -181,7 +181,7 @@ export default function Statistiques() {
    * Le libellé d'un compteur nommé : par le catalogue quand il compte une boisson, par la clé de
    * traduction sinon, et par le nom de la propriété quand il n'a ni l'un ni l'autre.
    *
-   * Le repli final n'est pas décoratif : la table de `compteurs.mjs` peut gagner un nom avant que
+   * Le repli final n'est pas décoratif : la table de `compteurs.ts` peut gagner un nom avant que
    * `messages/fr.json` ne gagne sa clé, et ce jour-là afficher `d738_cold_brew_bev` vaut mieux que
    * faire tomber la page — `tstat` lève sur une clé absente. Même repli que `statLabel`.
    */
@@ -238,7 +238,7 @@ export default function Statistiques() {
    *
    * ⚠️ Le motif d'origine a disparu : le serveur REFUSAIT une seconde lecture tant que la
    * précédente tournait (409), parce qu'elle l'aurait écrasée. Depuis la file de tâches
-   * (`src/lib/tasks.mjs`) il n'écrase plus rien — les huit plages pourraient partir d'un coup et
+   * (`src/lib/tasks.ts`) il n'écrase plus rien — les huit plages pourraient partir d'un coup et
    * former une seule tâche de huit pas, comme le fait « Tout lire ». L'attente ci-dessous est donc
    * devenue superflue ; elle est conservée telle quelle parce qu'elle est correcte et que la
    * remplacer demande d'étendre `/api/stats` à une liste de plages.

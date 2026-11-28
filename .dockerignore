@@ -14,7 +14,7 @@ out/
 .github/
 *.tsbuildinfo
 next-env.d.ts
-debug-capture.mjs
+debug-capture.ts
 ETAT.md
 
 # `public/boissons/` et `public/grains/` DOIVENT entrer : ce sont les visuels que l'image sert.

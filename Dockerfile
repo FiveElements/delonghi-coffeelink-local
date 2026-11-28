@@ -4,7 +4,7 @@
 # contrainte réseau : en LAN mode Ayla c'est la **machine à café** qui vient frapper notre serveur,
 # donc le port annoncé doit être joignable depuis son VLAN.
 #
-# Pas de `output: "standalone"` : le point d'entrée réel est notre `server.mjs`, pas le serveur
+# Pas de `output: "standalone"` : le point d'entrée réel est notre `server.ts`, pas le serveur
 # généré par Next, et le traçage de dépendances de standalone part de ce dernier. On installe donc
 # les dépendances de production dans l'image — plus gros, mais sans zone d'ombre.
 
@@ -71,7 +71,7 @@ ENV NODE_ENV=production \
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/.next ./.next
-COPY package.json pnpm-workspace.yaml next.config.mjs server.mjs ./
+COPY package.json pnpm-workspace.yaml next.config.ts server.ts ./
 COPY src ./src
 COPY messages ./messages
 # ⚠️ `public/` n'est PAS embarqué dans `.next` : Next le sert depuis le disque, à chaque requête.
@@ -93,4 +93,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.SERVER_PORT||3000)+'/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "server.mjs"]
+CMD ["node", "server.ts"]

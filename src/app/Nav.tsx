@@ -123,7 +123,7 @@ export default function Nav() {
    * avec Échap et l'inertie du fond ; avec l'attribut `open` seul, la tabulation continuait derrière
    * le panneau et on pouvait déclencher une commande de la machine qu'on ne voit pas. Depuis le
    * passage à `Sheet` (Radix), les trois viennent du composant — donc du code, et
-   * `scripts/verif-surfaces.mjs` les mesure au lieu de les supposer.
+   * `scripts/verif-surfaces.ts` les mesure au lieu de les supposer.
    *
    * L'état d'ouverture n'a plus qu'une source. Il en avait deux — l'attribut du `<dialog>` et
    * `ouvert` — tenues d'accord à la main par `ouvrir` / `fermer` ; `Sheet` étant contrôlé, la

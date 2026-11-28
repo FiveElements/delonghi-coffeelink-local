@@ -13,7 +13,7 @@ import { cn } from "@/ui/cn";
  * **Il est né dans `AffinageDialog` et il en est sorti le jour où il a eu un second hôte** — le
  * questionnaire de création (`CreationGrainDialog`). C'est la règle que cette page a déjà payée
  * deux fois : deux copies d'un même contrôle font atterrir une correction d'accessibilité sur l'un
- * et pas sur l'autre. Il n'y a donc qu'une implémentation, et `verif-surfaces.mjs` la vérifie une
+ * et pas sur l'autre. Il n'y a donc qu'une implémentation, et `verif-surfaces.ts` la vérifie une
  * fois pour les deux dialogues.
  *
  * ⚠️ **C'est un `radiogroup` écrit à la main, et il doit l'être en entier.** Des `<button>` posés

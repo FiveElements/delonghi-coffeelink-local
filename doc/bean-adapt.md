@@ -113,7 +113,7 @@ Bitmap.createScaledBitmap(bmp, bmp.getWidth() / 2,
 Base64.encodeToString(baos.toByteArray(), 0);   // 0 = DEFAULT ⇒ retours à la ligne tous les 76 car.
 ```
 
-Trois défauts, tous mesurés, tous délibérément **non** reproduits par `src/lib/image-grains.mjs` :
+Trois défauts, tous mesurés, tous délibérément **non** reproduits par `src/lib/image-grains.ts` :
 
 1. **Qualité 35/100** en JPEG.
 2. **Aucune taille de sortie fixe** : la largeur est la moitié de la largeur recadrée. Une photo de
@@ -281,10 +281,10 @@ produits.
 ### 3.2ter Ce que `lan-server` en fait
 
 Les **8 combinaisons** (2 mélanges × 4 torréfactions) ont été relevées le **2026-09-02** par
-`scripts/extract-bean-creation.mjs` — 8 requêtes, sans authentification, `locale: it_IT` comme
+`scripts/extract-bean-creation.ts` — 8 requêtes, sans authentification, `locale: it_IT` comme
 l'app. Le relevé est figé dans `src/lib/bean-creation.json` (les réponses brutes à côté, dans
 `bean-creation.brut.json`, pour rejouer le décodage sans rappeler) et `composeGrainNeuf`
-(`src/lib/bean-adapt.mjs`) **le lit** :
+(`src/lib/bean-adapt.ts`) **le lit** :
 
 | mélange \ torréfaction | claire | moyenne | foncée | très foncée |
 |---|---|---|---|---|
@@ -309,14 +309,14 @@ Chaque axe était **inversé**. C'est la limite exacte d'une vérification sans 
 qu'un code fait ce qu'il dit, jamais qu'il dit vrai. La règle était plausible — c'est même de la
 caféologie correcte — et De'Longhi ne la suit pas.
 
-`scripts/verif-bean-adapt.mjs` rejoue maintenant les 8 cases contre une **seconde transcription**
+`scripts/verif-bean-adapt.ts` rejoue maintenant les 8 cases contre une **seconde transcription**
 du relevé, écrite dans le script : comparer la sortie au JSON qu'elle lit ne vérifierait qu'un
 accès de tableau, tandis que la copie fait échouer le script si le fichier généré est édité à la
 main. La table est **lue et non factorisée** — `robusta ? 3 : 4` serait exact aujourd'hui et
 réinventerait sept points sur huit le jour où une case changerait.
 
 ⚠️ **Le questionnaire d'ajout de grain ne touche pas le réseau.** Le relevé est un acte explicite,
-au même titre que `import-bean-images.mjs`, et son résultat est servi depuis le dépôt. L'écran, lui,
+au même titre que `import-bean-images.ts`, et son résultat est servi depuis le dépôt. L'écran, lui,
 lit `source` dans la réponse (`"delonghi"` + la date) et n'écrit aucun libellé d'origine en dur :
 c'est ce qui a fait disparaître l'avertissement tout seul le jour du relevé.
 

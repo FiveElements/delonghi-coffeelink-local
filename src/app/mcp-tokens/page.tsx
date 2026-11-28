@@ -16,10 +16,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
  * **Global, comme `/machines` et `/api/apps`.** Un jeton n'appartient à aucune machine — il donne
  * à un client MCP l'accès qu'il porte sur TOUTES les machines de ce serveur — donc `fetch` brut et
  * jamais `mfetch` : il n'y a pas de `?machine=` à joindre ici (voir `/api/mcp-tokens` dans
- * `server.mjs`, servi avant toute résolution de machine).
+ * `server.ts`, servi avant toute résolution de machine).
  *
  * **Le jeton en clair ne traverse le réseau qu'une fois.** Le serveur ne range que son hachage
- * (`store.mjs`, `hashToken`) : la réponse de création est le seul moment où la valeur existe côté
+ * (`store.ts`, `hashToken`) : la réponse de création est le seul moment où la valeur existe côté
  * client, d'où `freshToken` — un état qui ne survit ni à un rechargement ni à un aller-retour vers
  * la liste, et que rien ne repeuple après coup.
  */
@@ -51,7 +51,7 @@ const date = (ms: number | null | undefined) => (ms ? new Date(ms).toLocaleStrin
  * Les catégories et natures sont déjà des mots français lus tels quels dans le protocole
  * (« boissons », « lecture »…) : ce ne sont pas des identifiants opaques à faire passer par
  * `src/i18n/labels.ts`. Mais l'identifiant lui-même est ASCII (`MCP_SCOPE_CATEGORIES`,
- * `store.mjs`) — capitaliser « reglages » à la volée aurait donné « Reglages », sans l'accent
+ * `store.ts`) — capitaliser « reglages » à la volée aurait donné « Reglages », sans l'accent
  * que le mot français porte. La table ne fait QUE ça : rhabiller l'accent qu'un identifiant de
  * catégorie ne peut pas porter, pas traduire un sens.
  */

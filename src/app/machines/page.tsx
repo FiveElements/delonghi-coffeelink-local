@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { MachineSummary, currentMachine, forId, setCurrentMachine } from "../machine";
+import { type MachineSummary, currentMachine, forId, setCurrentMachine } from "../machine";
 import { useMachineEvents } from "../events";
 import { useConfirm } from "../confirm";
 import Alerte from "../Alerte";

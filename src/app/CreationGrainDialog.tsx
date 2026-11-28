@@ -251,7 +251,7 @@ export default function CreationGrainDialog({
                   questionnaire De'Longhi ne porte aucun `img`, contrairement aux quatre réponses de
                   la torréfaction. Inventer deux dessins de grains ici ferait passer une illustration
                   de notre main pour un visuel de l'appareil.
-                  Écrits à la main, pas en boucle — `verif-messages.mjs` ne voit que les clés
+                  Écrits à la main, pas en boucle — `verif-messages.ts` ne voit que les clés
                   littérales, et un `t(`blend${n}`)` lui échapperait. */}
               <ChoixVisuel nom="blend" etiquette={t("blend")} valeur={melange} onChange={setMelange} disabled={off} options={[
                 { v: 1, libelle: t("blend1") },

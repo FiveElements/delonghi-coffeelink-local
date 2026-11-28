@@ -49,20 +49,21 @@ jobs:
       - name: Vérifier les types
         run: node_modules/.bin/tsc --noEmit
 
-      # `server.mjs` et les modules de `src/lib` ne passent pas par TypeScript — `tsconfig.json`
-      # n'inclut que les `.ts`/`.tsx` — alors qu'ils constituent le serveur RÉEL ; les copies `.ts`
-      # sont shadowées et ne tournent pas. `node --check` attrape la syntaxe, oxlint (étape
-      # suivante) le reste. Les deux, parce qu'ils ne voient pas la même chose : `node --check`
-      # couvre aussi les fichiers qu'oxlint pourrait ne pas atteindre si sa configuration dérivait.
-      - name: Vérifier la syntaxe des modules ESM
-        run: |
-          for f in server.mjs src/lib/*.mjs; do
-            echo "  node --check $f"
-            node --check "$f"
-          done
+      # Node 26 exécute ces `.ts` DIRECTEMENT, par effacement des types (« strip-only ») : pas de
+      # build. `tsc` dit si les types sont justes, pas si Node saura charger le fichier — un `enum`,
+      # un `namespace` ou une propriété de paramètre passent `tsc` et font échouer le chargement.
+      # `erasableSyntaxOnly` les refuse côté `tsc` ; cette étape le prouve avec l'effaceur de
+      # Node lui-même (`stripTypeScriptTypes`), qui lève aussi sur une erreur de syntaxe.
+      # `node --check`, qui tenait ce rôle pour les `.mjs`, ne convient plus : il lit un `.ts`
+      # comme du JavaScript, sans effacer les types, et refuserait le premier `: string`.
+      - name: Vérifier que Node sait effacer les types
+        run: >-
+          node --disable-warning=ExperimentalWarning -e
+          'const{stripTypeScriptTypes:s}=require("node:module"),{readFileSync:r}=require("node:fs");for(const f of process.argv.slice(1))try{s(r(f,"utf8"))}catch(e){console.error(f+": "+e.message);process.exitCode=1}'
+          server.ts debug-capture.ts src/lib/*.ts scripts/*.ts
 
       # oxlint (`.oxlintrc.json`), avertissements compris (`--deny-warnings`). Il couvre TOUT le
-      # dépôt — `.mjs`, `.ts`, `.tsx` — parce qu'il analyse TypeScript avec son propre parseur.
+      # dépôt — `.ts`, `.tsx`, `.js` — parce qu'il analyse TypeScript avec son propre parseur.
       # ESLint, qu'il remplace, ne voyait que les `.mjs` : il lui fallait `typescript-eslint`, qui
       # appelle l'API compilateur que TypeScript 7 n'exporte plus.
       - name: Linter (oxlint)
@@ -77,23 +78,23 @@ jobs:
       # seul endroit du projet où du comportement d'appareil est figé et rejouable.
       #
       # Couverture : la couverture V8 native de Node, sans instrumenter quoi que ce soit — chaque
-      # processus (enfants compris : `verif-surfaces` lève un vrai `server.mjs`) écrit ses compteurs
+      # processus (enfants compris : `verif-surfaces` lève un vrai `server.ts`) écrit ses compteurs
       # dans NODE_V8_COVERAGE, et `c8 report` les agrège en fin de job. Coupée pendant le build :
       # Next n'est pas notre code, et la tracer ne ferait que ralentir l'étape la plus longue.
       - name: Activer la couverture V8
         run: echo "NODE_V8_COVERAGE=${{ github.workspace }}/coverage/tmp" >> "$GITHUB_ENV"
 
       - name: Vérifier l'ordonnanceur de tâches
-        run: node scripts/verif-tasks.mjs
+        run: node scripts/verif-tasks.ts
 
       - name: Vérifier le décodage du monitor
-        run: node scripts/verif-monitor.mjs
+        run: node scripts/verif-monitor.ts
 
       # Les deux moitiés du multiplexeur. `verif-lansession` fait dialoguer les rôles « client »
       # et « appareil » d'une même session : se tromper de sens de clés ne lève AUCUNE erreur —
       # on obtient du déchiffrement plausible et illisible — donc c'est la seule façon de le voir.
       - name: Vérifier la session LAN dans les deux rôles
-        run: node scripts/verif-lansession.mjs
+        run: node scripts/verif-lansession.ts
 
       # Par propriétés (fast-check) : des dizaines de milliers de trames AU HASARD dans les
       # décodeurs, et des suites de charges quelconques dans la session LAN. Une graine nouvelle à
@@ -103,29 +104,29 @@ jobs:
         run: node scripts/verif-proprietes.js
 
       - name: Vérifier le registre d'applications
-        run: node scripts/verif-apps.mjs
+        run: node scripts/verif-apps.ts
 
-      # Le décodage des arguments de trames est l'inverse des constructeurs de server.mjs. Un
+      # Le décodage des arguments de trames est l'inverse des constructeurs de server.ts. Un
       # décalage d'un octet entre les deux ne lève aucune erreur : il produit des valeurs
       # plausibles et fausses, dans le journal même où l'on décide si une vraie cafetière vient de
       # lancer un café ou d'écraser une recette.
       - name: Vérifier le décodage des arguments de trames
-        run: node scripts/verif-args.mjs
+        run: node scripts/verif-args.ts
 
       # L'assemblage de la trame 0x83, l'autre moitié de la précédente. Elle est construite par un
       # module PUR que le navigateur appelle aussi — la carte d'une boisson affiche en direct ce
-      # que « Préparer avec ces valeurs » enverrait — et `server.mjs` ne fait plus qu'emballer le
+      # que « Préparer avec ces valeurs » enverrait — et `server.ts` ne fait plus qu'emballer le
       # résultat. Une seule fonction, donc, et ce script prouve qu'elle reste alignée sur le
       # décodeur : une largeur mal choisie ne lève rien, elle sert un autre café.
       - name: Vérifier l'assemblage de la trame de boisson
-        run: node scripts/verif-trame-boisson.mjs
+        run: node scripts/verif-trame-boisson.ts
 
       # Le report d'une recette dans un emplacement perso est une écriture PERSISTANTE : un
       # ingrédient omis au lieu d'être écrit absent laisse en place celui de la recette précédente,
       # et un `VISIBLE` mis à zéro fait disparaître de la machine l'emplacement qu'on vient de
       # remplir. Ni l'un ni l'autre ne lève quoi que ce soit à l'exécution.
       - name: Vérifier le report d'une recette dans un emplacement
-        run: node scripts/verif-transfert.mjs
+        run: node scripts/verif-transfert.ts
 
       # La table des compteurs nommés apparie à la main des noms de propriétés Ayla, des clés de
       # traduction et des identifiants de boissons. Chacun de ses défauts est muet : un beverageId
@@ -133,7 +134,7 @@ jobs:
       # de l'eau vaut 2000 (l'app) et non 1000 (l'intégration Home Assistant dont vient une partie
       # de la table) — s'y tromper affiche des litres deux fois trop grands, parfaitement plausibles.
       - name: Vérifier la table des compteurs nommés
-        run: node scripts/verif-compteurs.mjs
+        run: node scripts/verif-compteurs.ts
 
       # Le catalogue de traduction est chargé par next-intl : un JSON invalide, ou un message
       # contenant des chevrons (lus comme des balises de texte enrichi), casse l'interface à
@@ -158,7 +159,7 @@ jobs:
       # MISSING_MESSAGE dans la console du navigateur, donc seulement si quelqu'un ouvre la page ET
       # regarde la console — c'est arrivé.
       - name: Vérifier les clés de traduction
-        run: node scripts/verif-messages.mjs
+        run: node scripts/verif-messages.ts
 
       # Les contrastes sont calculés depuis toujours, et ils étaient écrits dans un commentaire
       # d'en-tête : une table à la main ne suit pas une rampe qui bouge, et sa version précédente
@@ -166,7 +167,7 @@ jobs:
       # vit. Trois couples tombaient sous le seuil, un par finition, donc invisibles à qui ne
       # regarde que la sienne. Ce script relit les valeurs livrées et refait les 72 calculs.
       - name: Vérifier les contrastes des deux finitions
-        run: node scripts/verif-contraste.mjs
+        run: node scripts/verif-contraste.ts
 
       # L'empreinte des visuels lie quatre pièces — l'extracteur qui l'écrit, la table qui la
       # porte, la vignette qui la pose sur son URL, la configuration qui accorde `immutable` à
@@ -174,7 +175,7 @@ jobs:
       # l'identique, et seul le cache s'éteint. Sans images (elles sont gitignorées), le script
       # contrôle les quatre accords de code et annonce le cinquième comme sauté.
       - name: Vérifier la chaîne de l'empreinte des visuels
-        run: node scripts/verif-images.mjs
+        run: node scripts/verif-images.ts
 
       # Le grain sélectionné se lit à deux endroits : le drapeau de l'octet 50 d'une trame `0xBA`
       # par index (six trames), et le mot 4 de `d260_beansystem_sync_par` (une lecture). Le second
@@ -182,14 +183,14 @@ jobs:
       # rejoue les trames des deux côtés de ce changement : un décalage d'un mot ne lèverait rien,
       # il rendrait un index de grain plausible et faux.
       - name: Vérifier le décodage du grain sélectionné
-        run: node scripts/verif-beansync.mjs
+        run: node scripts/verif-beansync.ts
 
       # Les deux règles Bean Adapt, chacune rejouée contre un relevé : l'affinage contre la matrice
       # de neuf cases de `getBeanSystemAdv.sr`, la création contre les huit cases de
       # `getBeanSystem.sr`. Aucune des deux n'avait de vérification avant, et la seconde a vécu un
       # jour comme règle de la maison — verte, étiquetée comme telle, et fausse sur les deux axes.
       - name: Vérifier les règles Bean Adapt
-        run: node scripts/verif-bean-adapt.mjs
+        run: node scripts/verif-bean-adapt.ts
 
       # Le relevé lui-même, rejoué HORS RÉSEAU sur les réponses brutes conservées à côté de la
       # table (`--brut`). Deux choses en découlent : le décodage — `json_settings` est une chaîne
@@ -198,14 +199,14 @@ jobs:
       # main. Le `git diff` est le test : le script réécrit le fichier, il doit tomber identique.
       - name: Rejouer le relevé des 8 cases, hors réseau
         run: |
-          node scripts/extract-bean-creation.mjs --brut src/lib/bean-creation.brut.json
+          node scripts/extract-bean-creation.ts --brut src/lib/bean-creation.brut.json
           git diff --exit-code src/lib/bean-creation.json
 
       # La photo d'un grain rapatriée du datum Ayla `BS<index>IMG` : le type est reniflé DANS les
       # octets, jamais pris de ce que le nuage annonce, et l'index est celui de l'octet 4 de la
       # trame `0xBA`. Se tromper d'index ne lève rien — il range la photo sous un autre grain.
       - name: Vérifier le reniflage d'une photo de grain
-        run: node scripts/verif-datum-grains.mjs
+        run: node scripts/verif-datum-grains.ts
 
       # Une variable vide désactive la couverture : Node ne la lit que si elle est non vide.
       - name: Build
@@ -215,13 +216,13 @@ jobs:
           NODE_V8_COVERAGE: ""
 
       # ⚠️ **Cette étape vient APRÈS le build, pour la même raison structurelle que
-      # `verif-surfaces.mjs` ci-dessous** : elle lève un vrai `server.mjs` en mode production (sans
+      # `verif-surfaces.ts` ci-dessous** : elle lève un vrai `server.ts` en mode production (sans
       # `--dev`), qui sert `.next/`, pas les sources. Placée avec les vérifications pures — c'est là
       # qu'elle était — le serveur de test ne répondait jamais (`.next/BUILD_ID` absent) et le script
       # échouait au bout de 9 s sur un faux « le serveur de test ne répond pas », sans qu'aucun outil
       # MCP ne soit en cause. Reproduit et corrigé après un premier run rouge sur `v0.1.1`.
       - name: Vérifier le serveur MCP (catalogue, authentification, portée)
-        run: node scripts/verif-mcp.mjs
+        run: node scripts/verif-mcp.ts
 
       # Les surfaces, dans un vrai navigateur — la seule chose que ni tsc, ni oxlint, ni les onze
       # vérifications pures ne regardent. Il existe pour la migration vers shadcn : le piège de
@@ -232,12 +233,12 @@ jobs:
       # refuse par principe les scripts d'installation tiers, et le paquet complet en télécharge
       # 150 Mo). Sans Chrome, le script SAUTE en le disant plutôt que d'échouer.
       #
-      # ⚠️ **Cette étape vient APRÈS le build, et c'est structurel.** Le script lève `server.mjs`
+      # ⚠️ **Cette étape vient APRÈS le build, et c'est structurel.** Le script lève `server.ts`
       # en mode production : il sert `.next/`, pas les sources. Placé avec les vérifications pures
       # — c'est là qu'il était — il s'arrêtait sur « Aucun build Next (.next/BUILD_ID absent) » et
       # faisait rougir la CI sans qu'aucune surface ne soit en cause. Ne pas le remonter.
       - name: Vérifier les surfaces dans un navigateur
-        run: node scripts/verif-surfaces.mjs
+        run: node scripts/verif-surfaces.ts
 
       # Vérifie que le stockage SQLite s'initialise et migre correctement, sans machine ni réseau.
       - name: Vérifier le stockage SQLite
@@ -246,7 +247,7 @@ jobs:
           mkdir -p /tmp/ci-data
           echo '{"recipes":[{"id":"ci","name":"CI","updatedAt":1}]}' > /tmp/ci-data/recipes.json
           DATA_DIR=/tmp/ci-data node --input-type=module -e "
-            const S = await import('./src/lib/store.mjs');
+            const S = await import('./src/lib/store.ts');
             const info = S.storageInfo();
             if (info.journalMode !== 'wal') throw new Error('journal attendu WAL, obtenu ' + info.journalMode);
             if (info.counts.recipes !== 1) throw new Error('la migration JSON n a pas repris la recette');
@@ -290,7 +291,7 @@ jobs:
             console.log('base v1 fabriquée');
           "
           DATA_DIR=/tmp/ci-v1 node --input-type=module -e "
-            const S = await import('./src/lib/store.mjs');
+            const S = await import('./src/lib/store.ts');
             const info = S.storageInfo();
             if (info.schemaVersion !== 4) throw new Error('schema v4 attendu, obtenu v' + info.schemaVersion);
             if (info.machines !== 1) throw new Error('une machine attendue, obtenu ' + info.machines);
@@ -309,7 +310,7 @@ jobs:
           "
           # Deuxième démarrage : la migration ne doit pas rejouer.
           DATA_DIR=/tmp/ci-v1 node --input-type=module -e "
-            const S = await import('./src/lib/store.mjs');
+            const S = await import('./src/lib/store.ts');
             if (S.bootMessages.length) throw new Error('la migration a rejoue : ' + S.bootMessages.join(' | '));
             console.log('deuxieme demarrage : aucune remigration');
           "
@@ -335,7 +336,7 @@ jobs:
             console.log('base v2 fabriquée');
           "
           DATA_DIR=/tmp/ci-v2 node --input-type=module -e "
-            const S = await import('./src/lib/store.mjs');
+            const S = await import('./src/lib/store.ts');
             const info = S.storageInfo();
             if (info.schemaVersion !== 4) throw new Error('schema v4 attendu, obtenu v' + info.schemaVersion);
             const st = S.forMachine('m1');
@@ -349,9 +350,8 @@ jobs:
             console.log('pas v2 → v3 → v4 OK');
           "
 
-      # Le périmètre est celui du code qui tourne vraiment : `server.mjs` et les modules `.mjs` de
-      # `src/lib`. Les `.ts` de `src/lib` et les routes `src/app/api` sont masqués à l'exécution
-      # (voir CLAUDE.md) — les compter ferait baisser le chiffre pour du code mort. `--all` compte
+      # Le périmètre est celui du code serveur qui tourne vraiment : `server.ts` et les modules de
+      # `src/lib` (les pages `src/app` sont compilées par Next, hors de portée de V8 ici). `--all` compte
       # aussi les modules qu'aucune vérification ne charge, à zéro : c'est le chiffre honnête.
       - name: Rapport de couverture
         if: ${{ !cancelled() }}
@@ -360,7 +360,7 @@ jobs:
         run: >-
           node_modules/.bin/c8 report --temp-directory coverage/tmp --reports-dir coverage
           --reporter=lcov --reporter=text-summary --all --src .
-          --include server.mjs --include 'src/lib/**/*.mjs'
+          --include server.ts --include 'src/lib/**/*.ts'
 
       # Pas de jeton sur une PR venue d'un fork : l'envoi échoue alors sans faire rougir la CI.
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -442,7 +442,7 @@ jobs:
       # ce dépôt se refuse à laisser passer, d'où cette assertion.
       #
       # Les URL sont DÉDUITES des tables générées, jamais écrites en dur : un fichier renommé par
-      # `extract-images.mjs` ou `import-bean-images.mjs` déplace aussi la vérification.
+      # `extract-images.ts` ou `import-bean-images.ts` déplace aussi la vérification.
       - name: Les visuels sont bien DANS l'image
         run: |
           node -e "
@@ -462,7 +462,7 @@ jobs:
               echo "::error::${chemin} ne pese que ${octets} octets"
               exit 1
             fi
-            # L'URL porte l'empreinte du jeu PRESENT, et next.config.mjs ne promet un an qu'a
+            # L'URL porte l'empreinte du jeu PRESENT, et next.config.ts ne promet un an qu'a
             # celle-la. Un cache revalidant ici voudrait dire que l'image a ete construite sur une
             # autre table que celle du depot.
             case "$entetes" in

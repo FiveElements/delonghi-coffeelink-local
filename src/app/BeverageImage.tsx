@@ -6,7 +6,7 @@ import IMAGES from "@/lib/beverage-images.json";
 /**
  * **Le dessin d'une boisson, un seul pour tout le produit.**
  *
- * Les images sont extraites de l'APK (`scripts/extract-images.mjs`) et servies depuis `public/`,
+ * Les images sont extraites de l'APK (`scripts/extract-images.ts`) et servies depuis `public/`,
  * qui est gitignoré ET que le Dockerfile ne copie pas : ni un clone frais ni l'image publiée n'en
  * ont aucune. C'est le `repli` ci-dessous — les initiales gravées — qui rend cette absence normale
  * plutôt que visible, et le `onError` le fait aussi pour un fichier qui manque à l'exécution.
@@ -38,7 +38,7 @@ export function useImageLabel() {
  * tasse pour cette boisson non plus ». Les deux moitiés étaient fausses, et pour une seule raison :
  * l'extracteur s'arrêtait au `switch` de `p258z7.z.B()` sans suivre son `default`, qui résout
  * l'image par NOM de ressource puis se replie sur `R.drawable.espresso`. L'application affiche donc
- * bel et bien une tasse pour la boisson 200 — celle de l'espresso. `extract-images.mjs` reproduit
+ * bel et bien une tasse pour la boisson 200 — celle de l'espresso. `extract-images.ts` reproduit
  * maintenant les deux étapes, et la table porte `repliParDefaut` pour que « 200 → espresso » ne se
  * confonde plus avec un dessin dédié. Le détail est dans l'en-tête de ce script.
  *
@@ -116,7 +116,7 @@ export function VignetteBoisson({
     // `Cache-Control: max-age=0` et cette rafale repartait en vingt et une requêtes
     // conditionnelles À CHAQUE navigation — mesuré : quatre vagues d'aller-retour, le serveur
     // étant en HTTP/1.1 (six connexions par origine). Avec l'empreinte, l'URL ne change que
-    // quand le dessin change, et `next.config.mjs` peut répondre `immutable` sans mentir.
+    // quand le dessin change, et `next.config.ts` peut répondre `immutable` sans mentir.
     <img
       className="bevVignette"
       src={`${IMAGES.chemin}/${fichier}.webp?v=${IMAGES.version}`}

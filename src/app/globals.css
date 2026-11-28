@@ -270,7 +270,7 @@
                      par la même impossibilité, dans l'autre sens).
 
        Chaque finition a donc UNE arête porteuse et une arête d'accompagnement, et ce n'est pas la
-       même. Mesuré par `scripts/verif-surfaces.mjs` au navigateur, dans les deux finitions. */
+       même. Mesuré par `scripts/verif-surfaces.ts` au navigateur, dans les deux finitions. */
     /* ── Rôles — graphite par défaut ─────────────────────────────────────────────────────────
        Le sombre n'est pas « le mode nuit » : c'est la finition d'origine de cet appareil. */
     color-scheme: dark;
@@ -543,7 +543,7 @@
 
        Le perçage vaut maintenant ±3 de ΔL\*, soit 5,7 d'amplitude totale contre 7,9 pour le pas
        d'une plaque. Il se voit en tournant la tête, il ne se lit pas, et il reste **dessous** —
-       ce rapport-là est vérifié par `scripts/verif-contraste.mjs`, qui refuse un perçage plus
+       ce rapport-là est vérifié par `scripts/verif-contraste.ts`, qui refuse un perçage plus
        fort que la plaque qu'il porte. C'est ce qu'on demande à un fond. */
     background-position: 0 1px, 0 0;
     background-size: 7px 7px, 7px 7px;
@@ -684,7 +684,7 @@
    pouce, le `<dialog>` natif donne le piège de focus, Échap et l'inertie du fond sans une ligne,
    l'`<input type="range">` natif porte l'échelle imprimée par `--crans`. Ces raisons n'ont pas
    cessé d'être vraies — elles sont devenues une DETTE que le composant doit rembourrer, et
-   `scripts/verif-surfaces.mjs` va vérifier les cinq au navigateur à chaque exécution. C'est
+   `scripts/verif-surfaces.ts` va vérifier les cinq au navigateur à chaque exécution. C'est
    l'uniformité payée comptant, pas une raison annulée.
 
    Ce contrat-ci n'a pas été élagué de ses tokens inemployés — il est le vocabulaire que la CLI

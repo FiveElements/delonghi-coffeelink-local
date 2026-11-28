@@ -5,10 +5,10 @@ import { useBeverageLabel, useParamLabel, useUnitLabel } from "@/i18n/labels";
 import { IMAGES_PERSO, Monogramme, VignetteBoisson, useImageLabel } from "./BeverageImage";
 import RecipeEditor from "./RecipeEditor";
 import { beverageParams, valeurSure, type Beverage, type Decoded, type Param, type RecipeParam } from "./beverage";
-// **Le constructeur de trame de PRODUCTION, celui que `server.mjs` appelle.** Pur et sans
+// **Le constructeur de trame de PRODUCTION, celui que `server.ts` appelle.** Pur et sans
 // `Buffer`, donc importable ici — c'est sa raison d'être. Recopier l'assemblage dans la page
 // aurait donné une ligne « Trame » qui ressemble à ce qui part sans en être la preuve.
-import { MODE, actionPreparer, encodeDispense } from "@/lib/trame-boisson.mjs";
+import { MODE, actionPreparer, encodeDispense } from "@/lib/trame-boisson.ts";
 import Icone from "./icons";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";

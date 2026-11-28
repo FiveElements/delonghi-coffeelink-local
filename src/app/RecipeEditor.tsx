@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useBeverageLabel, useParamLabel, useUnitLabel } from "@/i18n/labels";
-import { CROISES, INGREDIENTS, composable, croiseDe, groupeDe, presenceInitiale, valeurAbsente } from "@/lib/ingredients.mjs";
+import { CROISES, INGREDIENTS, composable, croiseDe, groupeDe, presenceInitiale, valeurAbsente } from "@/lib/ingredients.ts";
 import { beverageParams, defautModele, profilEcarte, valeurDepart, type Beverage, type Param, type RecipeParam } from "./beverage";
 import Icone from "./icons";
 import Alerte from "./Alerte";
@@ -287,7 +287,7 @@ export default function RecipeEditor({
    */
   const horsGroupe = basic.filter((b) => groupeAffiche(b.id) === null);
   const aucunIngredient = parIngredients && declares.length > 0 && declares.every((x) => !presents[x.g.cle]);
-  // Deux appels littéraux plutôt qu'une clé construite : `verif-messages.mjs` ne sait vérifier
+  // Deux appels littéraux plutôt qu'une clé construite : `verif-messages.ts` ne sait vérifier
   // que les littéraux, et une clé dynamique lui échapperait silencieusement.
   const nomGroupe = (cle: string) =>
     cle === "cafe" ? t("groupCoffee") : cle === "lait" ? t("groupMilk") : t("groupWater");

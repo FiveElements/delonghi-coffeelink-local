@@ -1,5 +1,5 @@
 {
- "_": "Réponses BRUTES relevées par scripts/extract-bean-creation.mjs — ne pas éditer à la main.",
+ "_": "Réponses BRUTES relevées par scripts/extract-bean-creation.ts — ne pas éditer à la main.",
  "releve": "2026-09-02T22:16:51.800Z",
  "source": "https://delonghibe.reply.it/api/getBeanSystem.sr",
  "locale": "it_IT",

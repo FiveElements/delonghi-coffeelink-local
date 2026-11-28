@@ -53,16 +53,16 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
 
       # Archive pour une installation sans Docker : il ne reste qu'à faire `pnpm install --prod`
-      # et `node server.mjs`. `data/` et `.env.local` en sont volontairement absents.
+      # et `node server.ts`. `data/` et `.env.local` en sont volontairement absents.
       - name: Fabriquer l'archive
         run: |
           name="delonghi-lan-server-${{ steps.meta.outputs.version }}"
           mkdir -p "dist/$name"
           cp -r .next src messages public package.json pnpm-lock.yaml pnpm-workspace.yaml \
-                next.config.mjs tsconfig.json server.mjs README.md DOCKER.md \
+                next.config.ts tsconfig.json server.ts README.md DOCKER.md \
                 .env.local.example "dist/$name/"
           # ⚠️ `public/` n'est PAS embarqué dans `.next` : Next le sert depuis le disque à
-          # chaque requête. Oublié ici, l'archive se décompresse, `node server.mjs` démarre,
+          # chaque requête. Oublié ici, l'archive se décompresse, `node server.ts` démarre,
           # l'interface s'affiche — et les 58 dessins de boisson et 7 visuels de grain rendent
           # 404 en silence. Même oubli que l'étape `runtime` du Dockerfile, même coût. On
           # l'atteste ici plutôt que de le découvrir chez celui qui installe.

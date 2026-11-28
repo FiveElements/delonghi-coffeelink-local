@@ -10,22 +10,22 @@
  *    pas le droit de lever une `TypeError` / `RangeError` tombée d'un index hors bornes, qui
  *    trahirait une lecture qu'aucune garde ne protège.
  * 2. **La session LAN est un aller-retour exact**, dans les deux sens et entrelacée, pour toute
- *    suite de charges JSON — pas seulement les cinq de `verif-lansession.mjs`.
+ *    suite de charges JSON — pas seulement les cinq de `verif-lansession.ts`.
  * 3. **`token(n)`** rend exactement `n` caractères de l'alphabet alphanumérique.
  *
- * ⚠️ **Ce fichier est en `.js`, pas en `.mjs` comme ses voisins, et c'est délibéré.** OpenSSF
+ * ⚠️ **Ce fichier est en `.js`, pas en `.ts` comme ses voisins, et c'est délibéré.** OpenSSF
  * Scorecard (critère Fuzzing) reconnaît le test par propriétés en JavaScript à un import de
- * `fast-check` dans un `*.js` / `*.jsx` — jamais dans un `.mjs`. Sans `"type": "module"` dans
- * package.json, un `.js` est du CommonJS : d'où `require` pour fast-check et `import()` pour les
- * modules du dépôt.
+ * `fast-check` dans un `*.js` / `*.jsx`. Depuis la migration TypeScript, package.json porte
+ * `"type": "module"` (sans lui, Node 26 réanalyse chaque `.ts` en ESM et l'annonce par un
+ * avertissement) : ce `.js` est donc un module ES, d'où `import` et `import.meta.dirname`.
  *
  * Rejouer un échec : `FC_SEED=<graine> node scripts/verif-proprietes.js` (la graine est affichée).
  */
-const fc = require("fast-check");
-const path = require("node:path");
-const { pathToFileURL } = require("node:url");
+import fc from "fast-check";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const lib = (m) => import(pathToFileURL(path.join(__dirname, "..", "src", "lib", m)).href);
+const lib = (m) => import(pathToFileURL(path.join(import.meta.dirname, "..", "src", "lib", m)).href);
 const seed = process.env.FC_SEED ? Number(process.env.FC_SEED) : Date.now() ^ (Math.random() * 2 ** 31);
 const RUNS = Number(process.env.FC_RUNS || 5000);
 
@@ -56,10 +56,10 @@ const neCassePas = (f) => (v) => {
 };
 
 (async () => {
-  const E = await lib("ecam-args.mjs");
-  const M = await lib("monitor.mjs");
-  const P = await lib("profiles.mjs");
-  const S = await lib("lansession.mjs");
+  const E = await lib("ecam-args.ts");
+  const M = await lib("monitor.ts");
+  const P = await lib("profiles.ts");
+  const S = await lib("lansession.ts");
 
   console.log(`\n— graine ${seed}, ${RUNS} cas par propriété —`);
   console.log("\n— les décodeurs de trames ne cassent jamais —");
@@ -78,7 +78,7 @@ const neCassePas = (f) => (v) => {
     decodeBeanSync: P.decodeBeanSync,
   };
   for (const [nom, f] of Object.entries(decodeurs)) test(nom, fc.property(trame, neCassePas(f)));
-  // Celle-ci prend des OCTETS, pas du base64 : c'est ainsi que server.mjs l'appelle.
+  // Celle-ci prend des OCTETS, pas du base64 : c'est ainsi que server.ts l'appelle.
   test("constanteConnue", fc.property(fc.uint8Array({ maxLength: 64 }), neCassePas(E.constanteConnue)));
 
   console.log("\n— la session LAN est un aller-retour exact —");

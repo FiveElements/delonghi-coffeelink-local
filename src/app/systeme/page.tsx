@@ -64,7 +64,7 @@ interface Payload {
       last: { at: number; status: number; updateAvailable: boolean; version: string | null; type: string | null } | null;
     };
   };
-  /** État du stockage local. Voir `src/lib/store.mjs`. */
+  /** État du stockage local. Voir `src/lib/store.ts`. */
   storage: {
     engine: string;
     file: string;
@@ -76,7 +76,7 @@ interface Payload {
     counts: { props: number; stats: number; beanSystems: number; recipes: number };
   };
   machineState: {
-    // `progress` n'existe pas : les octets 5-6 du monitor sont les capteurs (cf. server.mjs).
+    // `progress` n'existe pas : les octets 5-6 du monitor sont les capteurs (cf. server.ts).
     lastMonitor: {
       at: number;
       stateByte: number;

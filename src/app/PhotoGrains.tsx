@@ -5,7 +5,7 @@ import Cropper, { type Area } from "react-easy-crop";
 import "react-easy-crop/react-easy-crop.css";
 import Icone from "./icons";
 import { AfficheGrain } from "./VignetteGrains";
-import { FORMAT_IMAGE, RAPPORT_IMAGE } from "../lib/image-grains.mjs";
+import { FORMAT_IMAGE, RAPPORT_IMAGE } from "../lib/image-grains.ts";
 import { Slider } from "@/ui/slider";
 import { Button } from "@/ui/button";
 

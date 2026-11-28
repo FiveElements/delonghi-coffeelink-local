@@ -9,7 +9,7 @@ import type { LigneJournal, LotJournal } from "./events";
  * de journal, et la page la relisait en entier à CHAQUE poussée SSE — donc toutes les 250 ms
  * pendant une préparation — pour ~114 octets d'information neuve. Le journal a donc quitté cette
  * réponse : il s'amorce une fois par `GET /api/journal`, puis n'arrive plus que par ajouts sur le
- * flux déjà ouvert (voir `cadreJournal` dans `server.mjs`).
+ * flux déjà ouvert (voir `cadreJournal` dans `server.ts`).
  *
  * ⚠️ **La fusion se fait par `id`, et c'est ce qui fait survivre le repli des répétitions.**
  * Le serveur ne réécrit pas une ligne identique consécutive : il incrémente `repetitions` sur la
@@ -20,7 +20,7 @@ import type { LigneJournal, LotJournal } from "./events";
  * en n'entretenant qu'un seul curseur pour tous les abonnés.
  */
 
-/** Ce que chaque bac retient, côté navigateur. Doit suivre `JOURNAL_MAX` dans `server.mjs`. */
+/** Ce que chaque bac retient, côté navigateur. Doit suivre `JOURNAL_MAX` dans `server.ts`. */
 const GARDE: Record<LigneJournal["source"], number> = { machine: 400, apps: 200 };
 
 function fusionner(prev: LigneJournal[], lot: LotJournal): LigneJournal[] {

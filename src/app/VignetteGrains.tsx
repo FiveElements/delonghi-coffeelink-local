@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import GRAINS from "@/lib/bean-images.json";
 import { Monogramme } from "./BeverageImage";
-import { FORMAT_IMAGE, TORREFACTIONS } from "@/lib/image-grains.mjs";
+import { FORMAT_IMAGE, TORREFACTIONS } from "@/lib/image-grains.ts";
 import { RadioGroup, RadioGroupCran } from "@/ui/radio-group";
 
 /**
@@ -27,12 +27,12 @@ import { RadioGroup, RadioGroupCran } from "@/ui/radio-group";
  *
  * ⚠️ **Le Dockerfile ne copie pas `public/`.** Les visuels sont versionnés depuis le 2026-09-01,
  * donc un clone frais les a ; l'image publiée, elle, n'en a pas un seul — et ils appartiennent à
- * De'Longhi (voir l'en-tête de `scripts/import-bean-images.mjs`). L'absence reste donc un état
+ * De'Longhi (voir l'en-tête de `scripts/import-bean-images.ts`). L'absence reste donc un état
  * courant : le `onError` ci-dessous et le `repli` de l'appelant sont ce qui la rend normale plutôt
  * que visible. Même discipline que `BeverageImage.tsx`, et pour la même raison.
  */
 
-/* Les niveaux viennent de `image-grains.mjs`, pas d'ici : `server.mjs` valide contre la MÊME
+/* Les niveaux viennent de `image-grains.ts`, pas d'ici : `server.ts` valide contre la MÊME
    liste. Voir son en-tête pour la raison de ce voisinage. */
 const NIVEAUX: readonly number[] = TORREFACTIONS;
 
@@ -40,7 +40,7 @@ const NIVEAUX: readonly number[] = TORREFACTIONS;
  * Les libellés des quatre niveaux, **écrits en clés littérales**.
  *
  * ⚠️ `t(\`roast${n}\`)` aurait tenu en une ligne et aurait été INVISIBLE à
- * `scripts/verif-messages.mjs`, qui ne voit que les clés littérales écrites sur place. C'est le
+ * `scripts/verif-messages.ts`, qui ne voit que les clés littérales écrites sur place. C'est le
  * défaut même qui a fait naître ce script : une clé calculée manque au catalogue sans que rien ne
  * le dise, et l'interface affiche alors la clé brute. Quatre appels littéraux coûtent trois lignes
  * et rendent l'oubli impossible.
@@ -55,7 +55,7 @@ function useLibellesTorrefaction(): Record<number, string> {
 /**
  * L'URL d'un visuel importé.
  *
- * `?v=` n'est pas un ornement : sans lui, `next.config.mjs` n'a rien à reconnaître et ces images
+ * `?v=` n'est pas un ornement : sans lui, `next.config.ts` n'a rien à reconnaître et ces images
  * repartent en requêtes conditionnelles à chaque navigation. L'extension vient de la table et non
  * d'ici — la source livre du PNG aujourd'hui, et le jour où elle livre autre chose, une seule
  * déclaration doit bouger.
@@ -70,7 +70,7 @@ function fichierTorrefaction(niveau: number | null | undefined): string | undefi
   return (GRAINS.torrefaction as Record<string, string>)[String(niveau)];
 }
 
-/** Le fichier d'un aspect de crema. Mêmes identifiants que `bean-adapt.mjs` : 1, 2, 3. */
+/** Le fichier d'un aspect de crema. Mêmes identifiants que `bean-adapt.ts` : 1, 2, 3. */
 function fichierCrema(niveau: number | null | undefined): string | undefined {
   if (niveau === null || niveau === undefined) return undefined;
   return (GRAINS.crema as Record<string, string>)[String(niveau)];
@@ -247,7 +247,7 @@ export function ChoixTorrefaction({
            * ⚠️ **`orientation` n'est pas une indication de style, c'est le mappage des flèches.**
            * Sans elle, Radix laisse le groupe en vertical : le rail se dessine en rangée et ne
            * répond qu'à Haut/Bas — les flèches qui correspondent à ce qu'on VOIT ne font rien.
-           * Défaut constaté dans un vrai navigateur par `verif-surfaces.mjs`, invisible autrement :
+           * Défaut constaté dans un vrai navigateur par `verif-surfaces.ts`, invisible autrement :
            * rien n'est rouge, le clic marche, et seul le clavier perd le rail.
            */
           orientation="horizontal"

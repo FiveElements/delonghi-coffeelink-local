@@ -162,7 +162,7 @@ dépôt.
 
 ## Architecture, en bref
 
-- **`server.mjs` est le point d'entrée réel, dans tous les modes.** Il sert lui-même les endpoints
+- **`server.ts` est le point d'entrée réel, dans tous les modes.** Il sert lui-même les endpoints
   que la machine appelle (`/local_lan/*`) et l'API de contrôle (`/api/*`) en HTTP brut, et ne
   délègue à Next.js que les pages. Le client HTTP de l'ESP32 est rudimentaire et rejette le
   *framing* des réponses de Next.

@@ -46,7 +46,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
  * vraie préparation ; elle passe donc par `demander`, dont le `ConfirmDialog` est monté au niveau
  * de la page — hors de ce composant. Deux dialogues Radix se superposent alors, et c'est le second
  * qui prend le piège de focus. Cette superposition est vérifiée dans un vrai navigateur
- * (`scripts/verif-surfaces.mjs`) : c'est exactement le genre d'empilement qui compile, s'affiche,
+ * (`scripts/verif-surfaces.ts`) : c'est exactement le genre d'empilement qui compile, s'affiche,
  * et laisse le clavier dans la mauvaise couche.
  *
  * ⚠️ **Le contenu de l'étape est annoncé, pas seulement affiché.** Changer de page ne déplace rien
@@ -285,7 +285,7 @@ export default function AffinageDialog({
               {/* **Trois choix montrés côte à côte, plus une liste déroulante.** Ce sont les visuels
                   de l'app officielle (`question_1`), et le point d'une question sur la crema est
                   justement de COMPARER : une liste fermée n'en montre qu'un à la fois.
-                  Écrits à la main, pas en boucle — `verif-messages.mjs` ne voit que les clés
+                  Écrits à la main, pas en boucle — `verif-messages.ts` ne voit que les clés
                   littérales, et un `t(`crema${n}`)` lui échapperait. */}
               <ChoixVisuel nom="crema" etiquette={t("crema")} valeur={crema} onChange={setCrema} options={[
                 { v: 1, libelle: t("crema1"), image: <ImageCrema niveau={1} className="h-12 w-auto" /> },

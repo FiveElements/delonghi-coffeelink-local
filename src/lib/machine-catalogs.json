@@ -1,6 +1,6 @@
 {
   "_source": "assets/MachinesModels.json de l'APK Coffee Link, table « Machine Template » v1.510.",
-  "_nature": "Catalogue de boissons par modèle. Ce qui change d'un modèle à l'autre est la LISTE des recettes ; la numérotation des propriétés Ayla est un espace de noms De'Longhi figé, tenu dans beverages.mjs.",
+  "_nature": "Catalogue de boissons par modèle. Ce qui change d'un modèle à l'autre est la LISTE des recettes ; la numérotation des propriétés Ayla est un espace de noms De'Longhi figé, tenu dans beverages.ts.",
   "_support": "classic = toutes les recettes sont adressables ; extended = familles iced/mug qui passent par l'autre nomenclature (non implémentée, non vérifiable sans une machine de ce type) ; norecipes = la table n'en contient aucune pour ce modèle.",
   "tableVersion": "1.510",
   "models": {

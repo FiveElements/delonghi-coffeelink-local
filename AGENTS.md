@@ -76,7 +76,7 @@ for a user; this file covers what you need to know to change it.
    the firewall. This is the first cause of "nothing works".
 2. **The machine picks up exactly ONE command per visit** to `/local_lan/commands.json`. There are
    never two frames in flight. That is the only structural mutual exclusion in the system, and the
-   whole scheduler (`src/lib/tasks.mjs`) exists to make it explicit rather than accidental.
+   whole scheduler (`src/lib/tasks.ts`) exists to make it explicit rather than accidental.
 
 Commands reach a real appliance. Anything physical or persistent is confirmed before it is sent,
 and a failure is reported as a failure — never as a fake success.
@@ -87,14 +87,25 @@ Node **≥ 26** (the store uses native `node:sqlite`), pnpm 12 (pinned by `packa
 
 ```bash
 pnpm install
-pnpm dev        # node server.mjs --dev  — Next HMR for pages, raw HTTP for device endpoints
+pnpm dev        # node server.ts --dev  — Next HMR for pages, raw HTTP for device endpoints
 pnpm build && pnpm start
-pnpm lint       # oxlint, the whole repo: .mjs, .js, .ts, .tsx (see § Lint)
+pnpm lint       # oxlint, the whole repo: .ts, .tsx, .js (see § Lint)
 node_modules/.bin/tsc --noEmit
-for f in server.mjs src/lib/*.mjs; do node --check "$f"; done
+# can Node erase every type? (`node --check` cannot: it reads a .ts as plain JS)
+node --disable-warning=ExperimentalWarning -e 'const{stripTypeScriptTypes:s}=require("node:module"),{readFileSync:r}=require("node:fs");for(const f of process.argv.slice(1))try{s(r(f,"utf8"))}catch(e){console.error(f+": "+e.message);process.exitCode=1}' server.ts debug-capture.ts src/lib/*.ts scripts/*.ts
 ```
 
-`next dev` alone is **wrong**: it bypasses `server.mjs`, and the ESP32's HTTP client rejects the
+**Everything is TypeScript, and nothing is built.** Node 26 runs `server.ts`, `src/lib/*.ts` and
+`scripts/*.ts` directly by *type stripping*: it erases the annotations and runs what is left. Three
+consequences, each enforced by `tsconfig.json`: only **erasable** syntax (`erasableSyntaxOnly` — no
+`enum`, `namespace`, parameter properties); a type-only import **must** be `import type`
+(`verbatimModuleSyntax` — Node drops imports without knowing types, so a plain import of a type
+fails at load); relative imports carry their real `.ts` extension (`allowImportingTsExtensions`).
+`moduleResolution` stays `bundler`, not `nodenext`: the pages are bundled by Next and import
+without extensions (`./machine`, `@/ui/…`), which `nodenext` refuses outright. The one file left
+in JS is `scripts/verif-proprietes.js`: Scorecard Fuzzing only recognises `fast-check` in a `.js`.
+
+`next dev` alone is **wrong**: it bypasses `server.ts`, and the ESP32's HTTP client rejects the
 App Router's response framing. `pnpm dev:next-only` exists for pure page work only.
 
 ### Verification — there is no test framework
@@ -102,29 +113,29 @@ App Router's response framing. `pnpm dev:next-only` exists for pure page work on
 Each check is a standalone, dependency-free script. Running one script *is* "running a single test".
 
 ```bash
-node scripts/verif-tasks.mjs       # scheduler: ranks, preemption, sustain windows
-node scripts/verif-monitor.mjs     # monitor decoding, replayed on REAL captured frames
-node scripts/verif-lansession.mjs  # both LAN-session roles talking to each other
+node scripts/verif-tasks.ts       # scheduler: ranks, preemption, sustain windows
+node scripts/verif-monitor.ts     # monitor decoding, replayed on REAL captured frames
+node scripts/verif-lansession.ts  # both LAN-session roles talking to each other
 node scripts/verif-proprietes.js   # fast-check: random frames never crash a decoder; LAN session round-trips any payload (.js on purpose: Scorecard Fuzzing)
-node scripts/verif-apps.mjs        # app registry + payload parsing
-node scripts/verif-args.mjs        # ECAM frame table / argument decoding (byte offsets)
-node scripts/verif-transfert.mjs   # writing a local recipe into a machine slot
-node scripts/verif-compteurs.mjs   # named-counter table: beverage ids read back out of the property names, water divisor
-node scripts/verif-messages.mjs    # literal next-intl keys exist in messages/fr.json
-node scripts/verif-contraste.mjs   # WCAG + ΔL* of both finishes, read back out of globals.css
-node scripts/verif-images.mjs      # both artwork fingerprint chains — beverages AND beans (producer → table → URL → cache rule)
-node scripts/verif-datum-grains.mjs # sniffing a bean photo pulled from the Ayla datum (type from bytes, not from a claim)
-node scripts/verif-bean-adapt.mjs  # BOTH Bean Adapt rules, each against a recorded matrix: refine on 9 cells, create on all 8
-node scripts/verif-surfaces.mjs    # the 12 surfaces in a REAL headless Chrome (see § Styling)
-node scripts/verif-mcp.mjs         # MCP server: catalog drift, token auth/scope enforcement, a real start_beverage round-trip through fausse-machine.mjs
+node scripts/verif-apps.ts        # app registry + payload parsing
+node scripts/verif-args.ts        # ECAM frame table / argument decoding (byte offsets)
+node scripts/verif-transfert.ts   # writing a local recipe into a machine slot
+node scripts/verif-compteurs.ts   # named-counter table: beverage ids read back out of the property names, water divisor
+node scripts/verif-messages.ts    # literal next-intl keys exist in messages/fr.json
+node scripts/verif-contraste.ts   # WCAG + ΔL* of both finishes, read back out of globals.css
+node scripts/verif-images.ts      # both artwork fingerprint chains — beverages AND beans (producer → table → URL → cache rule)
+node scripts/verif-datum-grains.ts # sniffing a bean photo pulled from the Ayla datum (type from bytes, not from a claim)
+node scripts/verif-bean-adapt.ts  # BOTH Bean Adapt rules, each against a recorded matrix: refine on 9 cells, create on all 8
+node scripts/verif-surfaces.ts    # the 12 surfaces in a REAL headless Chrome (see § Styling)
+node scripts/verif-mcp.ts         # MCP server: catalog drift, token auth/scope enforcement, a real start_beverage round-trip through fausse-machine.ts
 ```
 
 These exist because the modules they cover are **pure**, and the errors they catch are the silent
 ones: a one-byte offset or a swapped key direction raises nothing — it produces plausible, wrong
 values. Keeping those modules pure is what keeps this possible.
 
-`verif-surfaces.mjs` is the one exception and it is deliberate: it seeds a throwaway SQLite
-database, boots `server.mjs` on port 3127 and drives a real Chrome (`puppeteer-core` — plain
+`verif-surfaces.ts` is the one exception and it is deliberate: it seeds a throwaway SQLite
+database, boots `server.ts` on port 3127 and drives a real Chrome (`puppeteer-core` — plain
 `puppeteer` is refused, third-party install scripts are blocked by `pnpm-workspace.yaml`; point
 `CHROME_PATH` at a binary if it is not in the usual place). It covers what only a browser can
 answer — a focus trap, an Escape key, an inert background, a face that is `inert` because it is
@@ -134,15 +145,15 @@ ships without it green.**
 Live diagnostics and loopback rigs, when a real behaviour is in question:
 
 ```bash
-node --env-file=.env.local debug-capture.mjs       # standalone LAN server on :3005, VERBATIM log
-PROXY_APPS=1 SERVER_PORT=3099 node server.mjs      # multiplexer, end to end on loopback:
-node scripts/faux-app.mjs --serveur 127.0.0.1:3099 --port 8888
-node scripts/fausse-machine.mjs --serveur 127.0.0.1:3099
-node scripts/extract-models.mjs                    # regenerate the APK-derived tables
-node scripts/extract-catalogs.mjs
-node scripts/extract-images.mjs
-node scripts/import-bean-images.mjs                # bean artwork, from De'Longhi's S3 (--json replays it offline)
-node scripts/extract-bean-creation.mjs             # the 8 cells of getBeanSystem.sr (--brut replays them offline)
+node --env-file=.env.local debug-capture.ts       # standalone LAN server on :3005, VERBATIM log
+PROXY_APPS=1 SERVER_PORT=3099 node server.ts      # multiplexer, end to end on loopback:
+node scripts/faux-app.ts --serveur 127.0.0.1:3099 --port 8888
+node scripts/fausse-machine.ts --serveur 127.0.0.1:3099
+node scripts/extract-models.ts                    # regenerate the APK-derived tables
+node scripts/extract-catalogs.ts
+node scripts/extract-images.ts
+node scripts/import-bean-images.ts                # bean artwork, from De'Longhi's S3 (--json replays it offline)
+node scripts/extract-bean-creation.ts             # the 8 cells of getBeanSystem.sr (--brut replays them offline)
 ```
 
 `.github/workflows/ci.yml` runs all of the above plus the SQLite migration chain (v1→v2→v3 on
@@ -151,7 +162,7 @@ thing to a spec of what can be proven without a coffee machine.
 
 ## Architecture
 
-### `server.mjs` is the real server, in every mode
+### `server.ts` is the real server, in every mode
 
 ~5 500 lines, and the single entry point. It handles in raw `node:http`, before Next ever sees the
 request: `/ota_status.json` + `/local_lan/lan_ota` (logged, never served), `/regtoken.json` +
@@ -162,7 +173,7 @@ request: `/ota_status.json` + `/local_lan/lan_ota` (logged, never served), `/reg
 
 There used to be `src/app/api/*/route.ts`, `src/app/local_lan/**/route.ts` and the `src/lib/*.ts`
 they imported (`config`, `session`, `crypto`, `ecam`, `machine`, `program`, `recipes`,
-`keepalive`): an early port, **dead at runtime** because `server.mjs` intercepts those paths first,
+`keepalive`): an early port, **dead at runtime** because `server.ts` intercepts those paths first,
 yet type-checking so they looked alive. They were deleted. Do not add a `route.ts` under `/api` or
 `/local_lan` — it would never run.
 
@@ -170,21 +181,21 @@ yet type-checking so they looked alive. They were deleted. Do not add a `route.t
 
 | Module | Role |
 |---|---|
-| `tasks.mjs` | the scheduler (pure: the instant is always a parameter) |
-| `ecam-args.mjs` | the ECAM protocol reference: op table, frame reading, argument decoding. Anything that *names* a command reads this table. **Isomorphic** — no `Buffer`, because `/pilotage`'s journal decodes frames in the browser |
-| `beverages.mjs` | per-model beverage catalog, Ayla property namespace, recipe bounds |
-| `ingredients.mjs` + `transfert.mjs` | what actually goes into a persistent recipe write |
-| `trame-bornes.mjs` | bounds-frame encoding |
-| `monitor.mjs` | real-time state / sensor / alarm decoding |
-| `compteurs.mjs` | the named-counter table: which Ayla property counts what, and how to read its value |
-| `profiles.mjs` | profile names, favourites, checksums, Bean System |
-| `bean-adapt.mjs` | **two** rules, both De'Longhi's: `computeBeanAdapt` refines an existing bean (a rule derived by sweeping the backend), `composeGrainNeuf` composes a new one (a recorded 8-cell table, `bean-creation.json`) |
-| `lansession.mjs` | LAN session crypto, both roles (client *and* device) |
-| `appregistry.mjs` + `appproxy.mjs` | multiplexer state and payloads |
-| `machine-models.mjs` | model identification from the serial number |
-| `store.mjs` | SQLite persistence (the one impure module) |
+| `tasks.ts` | the scheduler (pure: the instant is always a parameter) |
+| `ecam-args.ts` | the ECAM protocol reference: op table, frame reading, argument decoding. Anything that *names* a command reads this table. **Isomorphic** — no `Buffer`, because `/pilotage`'s journal decodes frames in the browser |
+| `beverages.ts` | per-model beverage catalog, Ayla property namespace, recipe bounds |
+| `ingredients.ts` + `transfert.ts` | what actually goes into a persistent recipe write |
+| `trame-bornes.ts` | bounds-frame encoding |
+| `monitor.ts` | real-time state / sensor / alarm decoding |
+| `compteurs.ts` | the named-counter table: which Ayla property counts what, and how to read its value |
+| `profiles.ts` | profile names, favourites, checksums, Bean System |
+| `bean-adapt.ts` | **two** rules, both De'Longhi's: `computeBeanAdapt` refines an existing bean (a rule derived by sweeping the backend), `composeGrainNeuf` composes a new one (a recorded 8-cell table, `bean-creation.json`) |
+| `lansession.ts` | LAN session crypto, both roles (client *and* device) |
+| `appregistry.ts` + `appproxy.ts` | multiplexer state and payloads |
+| `machine-models.ts` | model identification from the serial number |
+| `store.ts` | SQLite persistence (the one impure module) |
 
-Frame constructors live in `server.mjs`, decoders in `ecam-args.mjs`. They **must** read the same
+Frame constructors live in `server.ts`, decoders in `ecam-args.ts`. They **must** read the same
 table — a drift between them is invisible at runtime.
 
 ### Scheduler semantics
@@ -231,7 +242,7 @@ preparation, for ~114 bytes of new information. The journal has left that respon
 carries **~400 bytes for two lines**; the initial window is 3 152 bytes, once. And filters work on
 the full 400-line window the client holds, so "no result" can never mean "only the last fifty".
 
-⚠️ **`ecam-args.mjs` no longer knows `Buffer`, and that is what makes it usable in a browser.** It
+⚠️ **`ecam-args.ts` no longer knows `Buffer`, and that is what makes it usable in a browser.** It
 ran one at *load* time (the `0x37` constant), so importing it from a page threw before the first
 line of render and `/pilotage` came up blank with nothing saying why. The journal's drawer decodes
 a frame client-side, and it must do it with *that* table, not a copy — hence `Uint8Array` and
@@ -240,9 +251,9 @@ a frame client-side, and it must do it with *that* table, not a copy — hence `
 ### Statistics come down TWO channels, and they do not overlap
 
 `0xA2 0x0F` returns bare parameter ids (100, 3000, 23004…) — 62 of them on the reference machine,
-ten with an established meaning. That is `STAT_MEANINGS` + `STAT_RANGES` in `server.mjs`.
+ten with an established meaning. That is `STAT_MEANINGS` + `STAT_RANGES` in `server.ts`.
 
-The other channel is **named Ayla properties** (`src/lib/compteurs.mjs`): `d553_water_tot_qty`,
+The other channel is **named Ayla properties** (`src/lib/compteurs.ts`): `d553_water_tot_qty`,
 `d701_tot_bev_bw`, `d705_tot_id1_espr`… The official app reads both — `p258z7/w.java` has one method
 per channel — and this server now does too. Six of those names carry the same quantity as an
 already-identified `0xA2` parameter, which is what makes the pairing checkable on a single reading;
@@ -277,7 +288,7 @@ their own `settings` table.
 
 A bean's photo has **two possible origins**, both landing under the same `s<n>` key: cropped here
 by `PhotoGrains` (WebP 300×340), or pulled from the cloud by `POST /api/beans/visual/import` — the
-Ayla datum `BS<index>IMG`, where the index IS byte 4 of the `0xBA` frame (`profiles.mjs` reads
+Ayla datum `BS<index>IMG`, where the index IS byte 4 of the `0xBA` frame (`profiles.ts` reads
 `index: buf[4]`; the app formats `BS%sIMG` with the same byte). That import is this server's
 **fourth** cloud path after the LAN key, OTA and the session, and like them it is an explicit act,
 never a side effect of a page load. What it brings back is the app's format, not ours: JPEG q35,
@@ -302,11 +313,11 @@ The appliance's own flow has two halves, and they ask different questions:
 
 The refine rule is a *rule*, derived by sweeping the backend and replayed against a nine-cell
 matrix (`docs/bean-adapt.md` §4.4). The creation rule is a **table**: the input space is 2 × 4, so
-it was recorded whole — 8 requests, no authentication, `scripts/extract-bean-creation.mjs` on
+it was recorded whole — 8 requests, no authentication, `scripts/extract-bean-creation.ts` on
 2026-09-02 — and frozen into `src/lib/bean-creation.json`. `composeGrainNeuf` **reads** it.
 
 ⚠️ **Do not factor that table into a formula.** `grinder = robusta ? 3 : 4` is exact today and
-reinvents seven of the eight points the day one cell changes. `verif-bean-adapt.mjs` holds a
+reinvents seven of the eight points the day one cell changes. `verif-bean-adapt.ts` holds a
 *second* transcription of the recording, typed in from the raw log: comparing the function's output
 to the very JSON it reads would only prove an array access, whereas the copy fails the script if the
 generated file is hand-edited.
@@ -353,12 +364,12 @@ catalog is one model's, shared by all — a mismatch is reported, not corrected.
 
 `d270_serialnumber` characters 1–5 index the manufacturer table (`0132217055` → `17055` →
 ECAM 610.75.MB) — no cloud involved. `machine-models.json`, `machine-catalogs.json` and
-`beverage-images.json` are **generated** by `scripts/extract-*.mjs` from the APK (oxlint ignores the
+`beverage-images.json` are **generated** by `scripts/extract-*.ts` from the APK (oxlint ignores the
 first two). Never hand-edit them; change the script. **Two more are generated from a *network*
 source**, and each has an offline replay flag so the decoding can be re-checked without calling out
-again: `bean-images.json` from De'Longhi's questionnaire S3 (`scripts/import-bean-images.mjs
+again: `bean-images.json` from De'Longhi's questionnaire S3 (`scripts/import-bean-images.ts
 --json`), which names the four roast-level visuals and the three crema ones, and
-`bean-creation.json` from `getBeanSystem.sr` (`scripts/extract-bean-creation.mjs --brut`), the 8
+`bean-creation.json` from `getBeanSystem.sr` (`scripts/extract-bean-creation.ts --brut`), the 8
 cells of the bean-creation rule. That script writes **no table at all** if one cell fails: a table
 with seven cells out of eight would make the eighth setting up, which is the failure this whole repo
 is built to avoid.
@@ -374,7 +385,7 @@ they only ever look on **port 80** — listen there or redirect, otherwise nothi
 ### MCP server
 
 `/mcp` (Streamable HTTP) exposes the same control API as an MCP tool catalog. The tools live in
-`server.mjs` itself, next to `handleApi` — not a separate `src/lib/mcp-tools.mjs` — because each
+`server.ts` itself, next to `handleApi` — not a separate `src/lib/mcp-tools.ts` — because each
 tool closes over the same module-level mutable state (`MACHINES`, the scheduler, `CFG`) that
 `handleApi` already closes over; splitting them into a pure module would mean passing all of that
 back in, for no isolation actually gained. An action tool must refuse exactly when the HTTP route it
@@ -392,7 +403,7 @@ Next 16 App Router, React 19, TypeScript 7, `next-intl`. **Code, comments and UI
 with dense "why did this end up like this" headers — match that register.
 
 - Single locale, **no locale prefix** in URLs: a `[locale]` segment would move every page for no
-  benefit while `server.mjs` intercepts `/api` and `/local_lan` upstream.
+  benefit while `server.ts` intercepts `/api` and `/local_lan` upstream.
 - The API sends **stable protocol identifiers** (`slug` for a beverage, the ECAM enum name for a
   parameter) plus a fallback label; the client translates via `src/i18n/labels.ts`. Nothing
   translatable crosses the API. A name typed on the machine ("Grain A") is user data and is
@@ -434,7 +445,7 @@ for free. Use `aria-labelledby` pointing at the visible text.
 
 Three native elements were deliberately reversed in that migration — `<select>`, `<dialog>`,
 `<input type="range">`. Each was rendering a real service the component now owes:
-`scripts/verif-surfaces.mjs` checks all three in a real browser (focus trap, Escape, background
+`scripts/verif-surfaces.ts` checks all three in a real browser (focus trap, Escape, background
 inertness, the `--crans` graduation, the profile listbox). Do not weaken those assertions.
 
 ⚠️ **The layer cascade bites hardest on a bare `<button>`, and it bit three times in one block.**
@@ -447,7 +458,7 @@ their own header; and `button, input, select, textarea { font: inherit; line-hei
 **`facade`** beat even `button.journalBascule:not([data-slot])` (0,2,1) on `font-size`, so lines
 with a drawer rendered at 16 px next to their neighbours at 12. Specificity cannot answer the
 second one — only moving the matter onto the component can, which is why `CORPS_LIGNE` in
-`Journal.tsx` carries the size and leading as utilities. Both are measured in `verif-surfaces.mjs`.
+`Journal.tsx` carries the size and leading as utilities. Both are measured in `verif-surfaces.ts`.
 And a bare `<select>` / `<input>` inherits **nothing** here: the repo dresses its fields through
 shadcn's `[data-slot]`, so use `Input` and `Select` or they ship transparent and 44 px tall.
 
@@ -457,7 +468,7 @@ a poster on the front, everything editable on the back. `backface-visibility` hi
 `aria-hidden`, and nothing static catches the omission. The back is also mounted lazily (first flip),
 so a closed grid has no extra tab stop at all. The plateau's height is **measured in JS** and set in
 pixels, because a transition has nothing to interpolate between two `auto`. All of it is asserted in
-`verif-surfaces.mjs`, § *La carte de grain se retourne*.
+`verif-surfaces.ts`, § *La carte de grain se retourne*.
 
 ⚠️ **The back opens on the SAME frame as the front, and that is what removed its title line.** Both
 faces mount one `AfficheGrain` (in `VignetteGrains.tsx`, next to the precedence it wraps) — on the
@@ -476,7 +487,7 @@ not replace them.** A `title` answers nothing to a finger. What engages the appl
 confirmation dialog — which is where this repo already puts its warnings, and which shows everywhere;
 `title` keeps only the *why*. Section structure (`role="group"` + `.etiquetteGroupe`) replaced two
 more, which is why "Le grain" and "Réglages" are real named groups and not decorative headings.
-- `verif-messages.mjs` only sees **literal** keys written on the spot. A key requested inside a
+- `verif-messages.ts` only sees **literal** keys written on the spot. A key requested inside a
   helper that receives a translator (`fmtAge(sec, t)`) is invisible to it — that is the very bug
   that motivated it.
 
@@ -487,8 +498,8 @@ an error. It replaced ESLint 10 for one reason: **oxlint parses TS/TSX natively*
 `typescript-eslint`, which calls the classic compiler API that TypeScript 7 (the native port) no
 longer exports, and whose peer range excludes 7 — so under ESLint only the `.mjs` could be linted.
 Now the whole repo is, and `react-hooks/rules-of-hooks` + `exhaustive-deps` finally reach the pages.
-`tsconfig.json` still includes only `.ts`/`.tsx`: for `server.mjs` and `src/lib/*.mjs`, oxlint
-(with `no-undef` on) and `node --check` remain the only static net.
+Since the move to TypeScript, `tsc --noEmit` sees the server too (`server.ts`, `src/lib`, `scripts`),
+which it never did while they were `.mjs`; `no-undef` stays on only for the remaining `.js`.
 
 Every rule turned off in `.oxlintrc.json` carries its reason next to it — three React Compiler rules
 (the compiler is not enabled here) and `unicorn/no-new-array` (the frame constructors' idiom).
@@ -518,7 +529,7 @@ the two directories named above, not every variant one may extract. Removing the
 takes a history rewrite, not a `git rm`.
 
 Device-specific values in any documentation are written as markers (`IP_MACHINE`,
-`AC000W0XXXXXXXX`, `VLAN_IOT`, "Grain A/B"). `scripts/faux-app.mjs` is deliberately incapable of
+`AC000W0XXXXXXXX`, `VLAN_IOT`, "Grain A/B"). `scripts/faux-app.ts` is deliberately incapable of
 building an ECAM frame — a test tool that can start a hot-water rinse is a dangerous thing to leave
 lying around.
 

@@ -1,5 +1,5 @@
 {
- "_": "Généré par scripts/extract-bean-creation.mjs — ne pas éditer à la main.",
+ "_": "Généré par scripts/extract-bean-creation.ts — ne pas éditer à la main.",
  "releve": "2026-09-02",
  "source": "https://delonghibe.reply.it/api/getBeanSystem.sr",
  "locale": "it_IT",

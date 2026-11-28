@@ -29,7 +29,7 @@ interface Monitor {
   switches: { name: string; label: string }[];
   alarmBits: number;
   alarms: { bit: number; name: string | null; ignored: boolean }[];
-  /** Progression — octets 9, 10, 11. Voir `MONITOR_ETAPES` dans `server.mjs`. */
+  /** Progression — octets 9, 10, 11. Voir `MONITOR_ETAPES` dans `server.ts`. */
   fonction?: number | null;
   etape?: number | null;
   pourcent?: number | null;
@@ -514,7 +514,7 @@ export default function Dashboard() {
    * `rattraper()` derrière, pour le cas où le flux n'est pas établi : la page est alors sur son
    * minuteur de repli, et sans ce rappel elle garderait les lignes effacées à l'écran jusqu'à la
    * prochaine seconde ronde. Le curseur du navigateur est antérieur au vidage, donc le serveur
-   * répond par la fenêtre entière et le client REMPLACE. Voir `viderJournal` dans `server.mjs`.
+   * répond par la fenêtre entière et le client REMPLACE. Voir `viderJournal` dans `server.ts`.
    */
   const viderJournal = (source: "machine" | "apps") => {
     const total = journal.lignes.filter((l) => l.source === source).length;
@@ -773,7 +773,7 @@ export default function Dashboard() {
       {/* **Le panneau qui manquait, à la place d'une table qui ne pouvait rien afficher.**
           Ici se trouvait « File de commandes », qui lisait `status.queue` — un champ que
           `/api/status` n'a jamais renvoyé. Cette forme (`label` / `needsAck` / `queuedAt`) vient de
-          `src/lib/session.ts`, une des copies fantômes (supprimées depuis) qui ne tournaient pas : `server.mjs` n'a pas de
+          `src/lib/session.ts`, une des copies fantômes (supprimées depuis) qui ne tournaient pas : `server.ts` n'a pas de
           file de commandes ECAM, il tient UNE trame en vol (`m.program`) et une file de LECTURES
           (`m.import`). La table annonçait donc « Aucune commande en attente » cent pour cent du
           temps, balayage des grains compris.

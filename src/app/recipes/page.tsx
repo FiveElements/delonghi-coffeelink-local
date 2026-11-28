@@ -10,11 +10,11 @@ import BeverageCard, { type Report } from "../BeverageCard";
 import { paramOf, resumeReglages, type Beverage, type Param, type RecipeParam } from "../beverage";
 // La liste des réglages qui portent une QUANTITÉ vient du module qui décide déjà ce qu'un transfert
 // emporte : deux listes de « ce qui remplit la tasse » divergeraient à la première correction.
-import { QUANTITES } from "@/lib/transfert.mjs";
+import { QUANTITES } from "@/lib/transfert.ts";
 // La table des ingredients : elle sert ici a trouver la boisson qui en porte le plus, celle qui
 // servira de support technique a une composition libre.
-import { INGREDIENTS } from "@/lib/ingredients.mjs";
-import { TWO, encodeRecipeBounds } from "@/lib/trame-bornes.mjs";
+import { INGREDIENTS } from "@/lib/ingredients.ts";
+import { TWO, encodeRecipeBounds } from "@/lib/trame-bornes.ts";
 import { Input } from "@/ui/input";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -41,7 +41,7 @@ import { Card } from "@/ui/card";
  *
  * ⚠️ **Un emplacement perso ne déclare ni eau chaude ni thé** : une recette qui en porte ne peut
  * pas être transférée. C'est une limite de la cafetière, établie par trois vérifications
- * concordantes (voir `src/lib/ingredients.mjs`), et le serveur la rend sous forme de **clé** que
+ * concordantes (voir `src/lib/ingredients.ts`), et le serveur la rend sous forme de **clé** que
  * cette page traduit. Le bouton disparaît alors en DISANT pourquoi — le retirer en silence ferait
  * passer une limite de l'appareil pour une panne de l'application.
  *
@@ -269,7 +269,7 @@ export default function Recipes() {
        * **La trame est CALCULÉE, et elle est réellement construite** — pas laissée vide. « Infos
        * techniques » montrait « Trame lue (bornes 0xB0) » suivie de rien, ce qui décrivait deux
        * choses fausses à la fois : qu'il y avait eu une lecture, et qu'elle n'avait rien rendu.
-       * `encodeRecipeBounds` est l'inverse exact du décodeur, et `verif-transfert.mjs` le prouve en
+       * `encodeRecipeBounds` est l'inverse exact du décodeur, et `verif-transfert.ts` le prouve en
        * réencodant à l'identique les sept trames réelles de `doc/format-trame-boisson.md`, CRC
        * compris. Ce qui s'affiche est donc une trame que la machine reconnaîtrait.
        */

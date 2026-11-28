@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MachineSummary, currentMachine } from "./machine";
+import { type MachineSummary, currentMachine } from "./machine";
 
 /**
  * Abonnement au flux d'évènements du serveur (`GET /api/events`, Server-Sent Events).
@@ -11,7 +11,7 @@ import { MachineSummary, currentMachine } from "./machine";
  * se tromper : trop tôt il affiche l'état d'avant, trop tard il fait attendre pour rien.
  *
  * Le serveur émet quand quelque chose bouge — son déclencheur est le journal, qui voit tout
- * changement d'état. Voir `sseTouch()` / `sseWatch()` dans `server.mjs`.
+ * changement d'état. Voir `sseTouch()` / `sseWatch()` dans `server.ts`.
  *
  * Extrait ici parce que **six pages** en dépendent — les six qui affichent quelque chose que la
  * machine peut changer — et qu'une deuxième copie de la logique d'abonnement aurait divergé au
@@ -30,11 +30,11 @@ export interface LotJournal {
 }
 
 /**
- * Une ligne, telle que `L()` / `LA()` l'écrivent dans `server.mjs`.
+ * Une ligne, telle que `L()` / `LA()` l'écrivent dans `server.ts`.
  *
  * `id` identifie la ligne pour toujours ; `n` date sa dernière touche. Un repli de répétitions
  * mute la ligne en place côté serveur et lui donne un `n` neuf : c'est pour ça que la fusion se
- * fait par `id` et jamais par rang. Voir l'en-tête de `journalSeq` dans `server.mjs`.
+ * fait par `id` et jamais par rang. Voir l'en-tête de `journalSeq` dans `server.ts`.
  */
 export interface LigneJournal {
   id: number;

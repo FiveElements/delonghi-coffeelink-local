@@ -6,7 +6,7 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import type { LigneJournal } from "./events";
-import { argumentsTrame, hexCmd, octetsDeB64, opTrame } from "@/lib/ecam-args.mjs";
+import { argumentsTrame, hexCmd, octetsDeB64, opTrame } from "@/lib/ecam-args.ts";
 
 /**
  * **Le journal, en données structurées plutôt qu'en sortie de terminal.**
@@ -24,11 +24,11 @@ import { argumentsTrame, hexCmd, octetsDeB64, opTrame } from "@/lib/ecam-args.mj
  * premier message qui ne la suit pas, en silence. Les octets, eux, quittent la ligne et vivent
  * dans le tiroir.
  *
- * ⚠️ **Le décodage a lieu ICI, à l'ouverture du tiroir, et pas au serveur.** `ecam-args.mjs` est
- * pur et déjà importé par des composants client (`trame-boisson.mjs` dans `BeverageCard`) ; la
+ * ⚠️ **Le décodage a lieu ICI, à l'ouverture du tiroir, et pas au serveur.** `ecam-args.ts` est
+ * pur et déjà importé par des composants client (`trame-boisson.ts` dans `BeverageCard`) ; la
  * ligne ne transporte que la valeur base64 telle qu'elle a circulé. Décoder 400 lignes à chaque
  * poussée reviendrait à payer le tiroir sur les 399 qu'on n'ouvre pas — et surtout, le décodeur
- * reste unique : c'est la même table que celle que `server.mjs` lit pour construire les trames.
+ * reste unique : c'est la même table que celle que `server.ts` lit pour construire les trames.
  *
  * ⚠️ **Les libellés de boisson et de réglage sont volontairement génériques dans le tiroir.**
  * `argumentsTrame` sait les nommer si on lui fournit le catalogue du modèle ; `/pilotage` ne le
@@ -74,7 +74,7 @@ function hex2(n: number) {
 function Tiroir({ ligne, id }: { ligne: LigneJournal; id: string }) {
   const t = useTranslations("journal");
   // Les octets tels quels — aucun retrait, aucune interprétation, et pas de `Buffer` : ce
-  // module s'exécute dans le navigateur. Voir `octetsDeB64` dans `ecam-args.mjs`.
+  // module s'exécute dans le navigateur. Voir `octetsDeB64` dans `ecam-args.ts`.
   const octets = useMemo(() => [...octetsDeB64(String(ligne.trame ?? "").replace(/\s+/g, ""))], [ligne.trame]);
   const lu = useMemo(() => {
     try {
@@ -238,7 +238,7 @@ export default function Journal({
       {miennes.length > 0 && (
       <div className="journalFiltres" role="group" aria-label={t("filtres")}>
         <div className="journalDirs">
-          {/* Trois appels littéraux plutôt qu'une boucle sur `t(`dir.${d}`)` : `verif-messages.mjs`
+          {/* Trois appels littéraux plutôt qu'une boucle sur `t(`dir.${d}`)` : `verif-messages.ts`
               ne voit que les clés écrites sur place, et c'est ce trou-là qui l'a fait naître. */}
           <button type="button" className="journalDir" data-dir="in" aria-pressed={dirs.includes("in")} onClick={() => bascule("in")}>
             <Icone nom="entrant" taille={14} />

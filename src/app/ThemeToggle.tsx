@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { RadioGroup, RadioGroupCran } from "@/ui/radio-group";
-import { Theme, useTheme } from "./theme";
+import { type Theme, useTheme } from "./theme";
 
 /**
  * Sélecteur de thème : trois positions dans la barre.

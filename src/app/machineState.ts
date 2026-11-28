@@ -30,7 +30,7 @@ export function stateLabel(state: number, t: Translator): string {
  *
  * Le serveur envoie l'identifiant de protocole (`IFD_CARAFFE`, `COFFEE_WASTE_CONTAINER`…) *et*
  * un libellé français — mais ce libellé-là ne sert qu'au **journal du terminal**, exactement comme
- * ceux de `beverages.mjs` et `profiles.mjs`. Rien de traduisible ne doit traverser l'API : c'est ce
+ * ceux de `beverages.ts` et `profiles.ts`. Rien de traduisible ne doit traverser l'API : c'est ce
  * qui permet d'ajouter une langue sans toucher au serveur. Les deux pages qui affichent des
  * capteurs (`/` et `/pilotage`) rendaient `sw.label` directement, donc le français du serveur
  * arrivait tel quel dans l'interface. Les alarmes, elles, passaient déjà par l'espace `alarm`.
@@ -138,7 +138,7 @@ export const AGE_PERIME = 90;
  * pire que pas de barre** : elle affirme qu'une préparation progresse alors qu'on ne sait plus rien.
  *
  * 20 s = 2,6 × le pire écart entre deux trames jamais relevé (7,6 s, sur trois préparations
- * enregistrées dans `scripts/captures/`). `scripts/verif-monitor.mjs` vérifie que cette constante
+ * enregistrées dans `scripts/captures/`). `scripts/verif-monitor.ts` vérifie que cette constante
  * reste au-dessus du pire écart des captures : la resserrer sous la cadence réelle ferait
  * clignoter la barre.
  */

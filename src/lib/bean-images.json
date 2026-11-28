@@ -1,5 +1,5 @@
 {
- "_": "Généré par scripts/import-bean-images.mjs — ne pas éditer à la main.",
+ "_": "Généré par scripts/import-bean-images.ts — ne pas éditer à la main.",
  "chemin": "/grains",
  "extension": "png",
  "version": "ec759cca",

@@ -11,7 +11,7 @@ web
 
 ## Stack
 
-**Next 16 (App Router), React 19, TypeScript 7, next-intl.** `server.mjs` est le seul runtime.
+**Next 16 (App Router), React 19, TypeScript 7, next-intl.** `server.ts` est le seul runtime.
 
 **Tailwind 4 + shadcn/ui sont la cible, et la migration est faite.** Cela **lève** la contrainte
 précédemment enregistrée (« CSS vanilla, ni Tailwind ni librairie de composants ») : toute surface,
@@ -23,7 +23,7 @@ grammaires de bouton dans le même produit.
 ce dépôt avait choisis à l'écrit — `<select>`, `<dialog>`, `<input type="range">` — passent eux
 aussi aux primitives Radix. Chacun rendait un service réel (le sélecteur du système sous le pouce,
 le piège de focus et Échap sans une ligne, l'échelle imprimée par `--crans`) ; le composant doit
-donc le rendre à son tour, et `scripts/verif-surfaces.mjs` le vérifie au navigateur à chaque
+donc le rendre à son tour, et `scripts/verif-surfaces.ts` le vérifie au navigateur à chaque
 exécution. C'est le prix explicite de l'uniformité.
 
 **La façade reste écrite à la main, et c'est le cœur du montage.** shadcn est écrit contre un
@@ -153,10 +153,10 @@ sources coexistent, de disponibilité opposée :
   introduire un second format) et stockées dans la base locale. Elles ne quittent jamais le LAN —
   l'application officielle, elle, met la sienne dans un datum Ayla, donc dans le cloud.
 
-**Contraintes techniques du dépôt :** `server.mjs` est le seul runtime — il n'y a aucun handler
+**Contraintes techniques du dépôt :** `server.ts` est le seul runtime — il n'y a aucun handler
 de route Next (`src/app/api/**`, `src/app/local_lan/**` : supprimés, ils étaient morts à l'exécution). **Aucune suite de
 tests** : les changements de protocole se valident en direct contre la machine, et ce qui est
-prouvable sans elle l'est par 7 scripts autonomes (`scripts/verif-*.mjs`) parce que les modules
+prouvable sans elle l'est par 7 scripts autonomes (`scripts/verif-*.ts`) parce que les modules
 qu'ils couvrent sont purs.
 
 **Limites à énoncer, jamais à masquer :** sur les 30 modèles connectés de la table constructeur,
@@ -189,7 +189,7 @@ promouvoir en règle sans l'utilisateur) :
   favoris, 6 noms de recettes perso, activation de profil prouvée, identification du modèle
   (`D17055XX` → ECAM 610.75.MB), et — nouveau depuis le 2026-08-22 — **la distribution d'une
   boisson**, enregistrée sur trois préparations (espresso, espresso macchiato, lait chaud) que
-  `scripts/verif-monitor.mjs` rejoue. C'est le seul comportement d'appareil figé et rejouable du
+  `scripts/verif-monitor.ts` rejoue. C'est le seul comportement d'appareil figé et rejouable du
   dépôt ; il a livré un piège qu'aucune lecture du code décompilé n'aurait donné (un lait chaud
   s'arrête à 90 % et ne publie jamais 100).
 - **Non exercé, à ne pas présenter autrement** : la commande d'arrêt en cours de préparation, et une
