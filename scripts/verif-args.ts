@@ -19,6 +19,8 @@ import {
   ECAM_OPS, TWO, argumentsTrame, cleFusion, describeFrame, natureTrame, opReponse, octetsEcam, constanteConnue, profilVise,
   type ContexteArguments,
 } from "../src/lib/ecam-args.ts";
+import { decodeParameters, decodeSettings } from "../src/lib/parametres.ts";
+import { crcCcitt } from "../src/lib/trame-bornes.ts";
 
 let ko = 0;
 const test = (nom: string, fn: () => void) => {
@@ -357,6 +359,49 @@ test("une trame reste une trame malgré les blancs qu'Android y met", () => {
   // Tolérer les blancs ne doit RIEN tolérer d'autre : le motif garde son rôle.
   eq(octetsEcam("1787407876"), null, "un horodatage reste refusé");
   eq(octetsEcam("pas du base64 !"), null, "un texte quelconque aussi");
+});
+console.log("\n— les réponses 0xA2 / 0x95 : entières et intactes, ou refusées —");
+
+// Scellées avec le CRC de `trame-bornes.ts` : ici le CRC COMPTE, c'est lui qu'on vérifie.
+const scelle = (t: number[]) => { const c = crcCcitt(t); t[t.length - 2] = c >> 8; t[t.length - 1] = c & 0xff; return t; };
+const leve = (fn: () => unknown, motif: string, quoi: string) => {
+  try { fn(); } catch (e) { vrai(String(e instanceof Error ? e.message : e).includes(motif), `${quoi} : « ${e} » ne dit pas « ${motif} »`); return; }
+  throw new Error(`${quoi} : décodée au lieu d'être refusée`);
+};
+// 0xA2, deux entrées : 3000 = 9105, 3001 = 7.
+const a2Double = () => scelle([0xd0, 0x11, 0xa2, 0x0f, 0x0b, 0xb8, 0, 0, 0x23, 0x91, 0x0b, 0xb9, 0, 0, 0, 7, 0, 0]);
+// 0x95, deux adresses consécutives à partir de 61 : 61 = 2, 62 = 0x01020304.
+const r95 = () => scelle([0xd0, 0x0f, 0x95, 0x0f, 0, 61, 0, 0, 0, 2, 1, 2, 3, 4, 0, 0]);
+
+test("0xA2 : la réponse RÉELLE passe le CRC et se lit", () => {
+  // Seule réponse 0xA2 réelle conservée (historique du dépôt, `doc/commandes-cafe.md` § 12).
+  const reelle = [0xd0, 0x0b, 0xa2, 0x0f, 0x0b, 0xb8, 0x00, 0x00, 0x23, 0x91, 0x2e, 0xc0];
+  const pr = decodeParameters(entrante(reelle));
+  eq(pr.entries.length, 1, "une entrée");
+  eq(pr.entries[0].id, 3000, "id"); eq(pr.entries[0].value, 9105, "valeur");
+  // Portée par un datapoint, elle traîne 4 octets d'horodatage : ils sont au-delà de len + 1.
+  eq(decodeParameters(entrante([...reelle, 0x11, 0x22, 0x33, 0x44])).entries[0].value, 9105, "avec horodatage");
+});
+test("0xA2 : plusieurs entrées, toutes lues", () => {
+  const pr = decodeParameters(entrante(a2Double()));
+  eq(pr.entries.map((e) => `${e.id}=${e.value}`).join(","), "3000=9105,3001=7", "entrées");
+});
+test("0xA2 tronquée : refusée, pas lue à moitié", () => {
+  // Coupée à 12 octets, l'ancien décodeur rendait UNE entrée et prenait la suivante pour le CRC.
+  leve(() => decodeParameters(entrante(a2Double().slice(0, 12))), "tronquée", "tronquée");
+});
+test("0xA2 au CRC faux : refusée, pas une valeur plausible", () => {
+  const t = [0xd0, 0x0b, 0xa2, 0x0f, 0x0b, 0xb8, 0x00, 0x00, 0x23, 0x92, 0x2e, 0xc0];
+  leve(() => decodeParameters(entrante(t)), "corrompue", "un bit de valeur changé");
+});
+test("0x95 : adresses consécutives, une valeur de 4 octets chacune", () => {
+  const st = decodeSettings(entrante(r95()));
+  eq(st.entries.map((e) => `${e.addr}=${e.value}`).join(","), "61=2,62=16909060", "entrées");
+});
+test("0x95 tronquée ou au CRC faux : refusée", () => {
+  leve(() => decodeSettings(entrante(r95().slice(0, 12))), "tronquée", "tronquée");
+  const t = r95(); t[9] ^= 1;
+  leve(() => decodeSettings(entrante(t)), "corrompue", "corrompue");
 });
 console.log(ko ? `\n${ko} ÉCHEC(S)\n` : "\nTout passe.\n");
 process.exit(ko ? 1 : 0);

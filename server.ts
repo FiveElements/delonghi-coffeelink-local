@@ -44,6 +44,7 @@ import type { EntreeNom, SommesControle } from "./src/lib/profiles.ts";
 import { ALL_PROFILE_PROPS, PROFILE_NAME_PROPS, CUSTOM_NAME_PROPS, PRIORITY_PROPS, profilePropInfo, isProfileProp, decodeNames, decodePriorities, decodeChecksums, decodeBeanSystem, decodeBeanSync, BEAN_SYNC_PROP, BEAN_SYNC_PARAM, STRIDE_CLASSIC } from "./src/lib/profiles.ts";
 import type { Monitor } from "./src/lib/monitor.ts";
 import { decodeMonitor } from "./src/lib/monitor.ts";
+import { decodeParameters, decodeSettings } from "./src/lib/parametres.ts";
 import type { SessionLan } from "./src/lib/lansession.ts";
 import { makeLanSession, token } from "./src/lib/lansession.ts";
 // Multiplexeur : lan-server joue la machine auprès de N applications. Voir doc/spec-proxy-multi-app.md.
@@ -1039,64 +1040,7 @@ function frameDispense(bev: number, prof: number, mode: number, action: number, 
   return Buffer.from(encodeDispense(bev, prof, mode, action, params, check).bytes);
 }
 function datapointValue(frame: Buffer) { const t = Buffer.alloc(4); t.writeUInt32BE(Math.floor(Date.now() / 1000) >>> 0, 0); return Buffer.concat([frame, t]).toString("base64"); }
-/**
- * Décode la réponse `0xA2` — port de `p097j6.d.L()` case `-94`.
- *
- * ```
- * 0        0xD0
- * 1        len = taille totale − 1
- * 2        0xA2
- * 3        0x0F
- * 4..      n entrées de 6 octets : id sur 16 bits big-endian, puis valeur sur 32 bits
- * 2 dern.  CRC16
- * ```
- *
- * `n = (len − 5) / 6`. Une seule réponse peut donc porter plusieurs paramètres — c'est ce que
- * `qty` demande. Les valeurs sont lues en big-endian comme tout le reste du protocole (`z.g0()`).
- */
-function decodeParameters(b64: string) {
-  const buf = Buffer.from(b64, "base64");
-  if (buf.length < 12) throw new Error(`trame trop courte (${buf.length} octets)`);
-  if (buf[2] !== 0xa2) throw new Error(`commande inattendue 0x${buf[2].toString(16)}`);
-  const count = Math.floor((buf[1] - 5) / 6);
-  if (count < 1) throw new Error(`aucune entrée (len ${buf[1]})`);
-  const entries = [];
-  for (let i = 0; i < count; i++) {
-    const o = 4 + i * 6;
-    if (o + 6 > buf.length - 2) break;
-    entries.push({ id: (buf[o] << 8) | buf[o + 1], value: buf.readUInt32BE(o + 2) });
-  }
-  return { count, entries, hex: buf.subarray(0, buf[1] + 1).toString("hex").replace(/(..)/g, "$1 ").trim() };
-}
-
-/**
- * **Réponse `0x95` — les réglages machine.** Port de `p097j6/d.q0()`
- * (`getParametersFromByte`), et le format n'est PAS celui de `0xA2` :
- *
- *   octet 1     len
- *   octets 4-5  adresse du PREMIER réglage (16 bits)
- *   octets 6…   n × 4 octets de valeur, adresses consécutives ; n = (len − 7) / 4
- *
- * L'identifiant n'est donc pas répété devant chaque valeur, contrairement à `0xA2` : il faut
- * l'incrémenter soi-même. Confondre les deux formats décalerait chaque valeur d'un cran, ce qui
- * donnerait des réglages plausibles et faux — l'espèce d'erreur qui ne se voit qu'à l'usage.
- */
-function decodeSettings(b64: string) {
-  const buf = Buffer.from(b64, "base64");
-  if (buf.length < 8) throw new Error(`trame trop courte (${buf.length} octets)`);
-  if (buf[2] !== 0x95) throw new Error(`commande inattendue 0x${buf[2].toString(16)}`);
-  const count = Math.floor((buf[1] - 7) / 4);
-  if (count < 1) throw new Error(`aucune entrée (len ${buf[1]})`);
-  const premier = (buf[4] << 8) | buf[5];
-  const entries = [];
-  for (let i = 0; i < count; i++) {
-    const o = 6 + i * 4;
-    if (o + 4 > buf.length - 2) break;
-    entries.push({ addr: premier + i, value: buf.readUInt32BE(o) });
-  }
-  return { count, entries, hex: buf.subarray(0, buf[1] + 1).toString("hex").replace(/(..)/g, "$1 ").trim() };
-}
-
+/** `decodeParameters` (`0xA2`) et `decodeSettings` (`0x95`) : dans `src/lib/parametres.ts`, pour être prouvées. */
 /**
  * Enregistre un relevé de réglages. Stocké dans `meta.reglages` — quelques entiers, une table
  * aurait coûté une version de schéma pour six lignes (même raisonnement que `meta.beanPresets`).
