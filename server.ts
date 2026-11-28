@@ -11,6 +11,7 @@
  */
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isIP } from "node:net";
 // Résolution explicite du nom de la machine : voir `machineTarget()` — le module refuse un
 // en-tête `Host` qui ne soit pas son adresse IP.
 import { lookup as dnsLookup } from "node:dns/promises";
@@ -291,8 +292,11 @@ interface Machine {
 }
 
 // --- .env.local ---
+// `ENV_FILE` nomme un autre fichier (relatif au répertoire courant) : c'est ce qui rend un banc de
+// vérification hermétique — un chemin inexistant, et le `.env.local` du développeur n'est plus lu,
+// au lieu de devoir neutraliser ses variables une à une. Un fichier absent n'est pas une erreur.
 try {
-  for (const line of readFileSync(".env.local", "utf8").split("\n")) {
+  for (const line of readFileSync(process.env.ENV_FILE || ".env.local", "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
   }
@@ -309,6 +313,10 @@ const CFG = {
   serverIp: process.env.SERVER_IP || null,
   serverIpSource: process.env.SERVER_IP ? "SERVER_IP (.env.local)" : "non définie",
   port: Number(process.env.SERVER_PORT ?? "3000"),
+  // ALLOWED_HOSTS : noms d'hôte (séparés par des virgules) sous lesquels l'interface est servie, EN
+  // PLUS des littéraux IP, de `localhost`, des noms en `.local` et de SERVER_IP — voir
+  // `gardeNavigateur`. Sans lui, un nom comme « cafe.maison.lan » voit /api et /mcp refusés (403).
+  allowedHosts: (process.env.ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase().replace(/\.$/, "")).filter(Boolean),
 };
 
 /**
@@ -760,7 +768,8 @@ function pickMachine(req: Pick<IncomingMessage, "url">): { m: Machine; error?: u
  * `dsn: null` pour toujours, faute de jamais déclencher la sonde.
  */
 async function resolveMachineForTool(machineId?: string | null) {
-  const { m, error } = pickMachine({ url: `/x${machineId ? `?machine=${machineId}` : ""}` });
+  // `encodeURIComponent` : un identifiant contenant `&` ou `#` aurait sinon visé une autre machine.
+  const { m, error } = pickMachine({ url: `/x${machineId ? `?machine=${encodeURIComponent(machineId)}` : ""}` });
   if (!m) throw new Error(error);
   if (!m.dsn) await resolveDsn(m);
   return m;
@@ -951,7 +960,9 @@ function frameSetNames(cmd: number, first: number, last: number, entrees: { name
   bytes[5] = last & 0xff;
   let o = 6;
   for (const e of entrees) {
-    const n = encodeBeanName(e.name);         // même encodage : 20 caractères, UTF-16BE, complété de zéros
+    // Même encodage, mais seuls les 20 PREMIERS OCTETS partent : 10 caractères UTF-16BE, pas 20.
+    // Les appelants refusent un nom plus long — le tronquer ici en silence était le défaut.
+    const n = encodeBeanName(e.name);
     for (let i = 0; i < 20; i++) bytes[o + i] = n[i];
     bytes[o + 20] = e.icon & 0xff;
     o += 21;
@@ -1423,9 +1434,19 @@ async function executeDispense(m: Machine, { beverageId, profileId, recipeId, pa
     if (params != null && !Array.isArray(params)) throw new Error("`params` doit être un tableau");
     resolvedParams = params ?? [];
   }
-  m.activeProfile = Number(prof) || 1;
-  m.activeProfileConfirmed = true;
-  rememberActiveProfile(m);
+  // Tout est vérifié AVANT la trame, sur les deux chemins (une recette rangée a pu survivre à un
+  // changement de modèle) : l'encodeur masque chaque champ sur un octet, donc une boisson, un profil
+  // ou un paramètre faux partirait vers la machine sous une forme plausible au lieu d'être refusé.
+  const boisson = Number.isInteger(bev) ? m.catalog.byId(bev) : undefined;
+  if (!boisson) throw new Error(`boisson ${bev} inconnue sur ${m.catalog.model.type}`);
+  if (!Number.isInteger(prof) || prof < 1 || prof > m.catalog.model.nProfiles) {
+    throw new Error(`profil ${prof} invalide (ce modèle en a ${m.catalog.model.nProfiles})`);
+  }
+  for (const p of resolvedParams) {
+    const id = Number(p?.id);
+    if (!Number.isInteger(id) || !boisson.ingredients.includes(id)) throw new Error(`paramètre ${p?.id} inconnu pour la boisson ${bev}`);
+    if (!Number.isInteger(Number(p.value)) || Number(p.value) < 0) throw new Error(`valeur ${p.value} invalide pour le paramètre ${id} : entier positif attendu`);
+  }
   const act = actionPreparer(resolvedParams);
   const frame = frameDispense(bev, prof, MODE.START, act, resolvedParams);
   const label = `Préparer ${bevLabel(m, bev)}${act === ACT.PREPARE_INVERSION ? " (lait d'abord)" : ""}`;
@@ -1433,6 +1454,13 @@ async function executeDispense(m: Machine, { beverageId, profileId, recipeId, pa
   const cleLibelle = { k: "dispense", p: { inversion: act === ACT.PREPARE_INVERSION ? 1 : 0, ...r.p }, refs: r.refs };
   const ecamB64 = datapointValue(frame);
   const t = startProgram(m, ecamB64, label, 75000, "monitor", { rang: RANG.COMMANDE, cle: cleFusion(ecamB64), i18n: cleLibelle, meta: { dispense: true } });
+  // Le profil actif n'est adopté qu'une fois la commande ACCEPTÉE par la file : une file pleine
+  // laissait sinon l'interface afficher un profil vers lequel rien ne partira jamais.
+  if (t.ok) {
+    m.activeProfile = prof;
+    m.activeProfileConfirmed = true;
+    rememberActiveProfile(m);
+  }
   const reg = await postLocalReg(m);
   return { program: label, frameHex: frame.toString("hex").replace(/(..)/g, "$1 ").trim(), register: reg, ...tacheRendue(t) };
 }
@@ -1548,12 +1576,17 @@ function ensureKeepalive(m: Machine) {
   if (m.keepalive) return;
   L("sys", "keep-alive", "démarré (2,5 s)", m);
   let videDepuis = 0;
+  // Un `local_reg` peut attendre 8 s une machine muette, l'intervalle en vaut 2,5 : sans verrou,
+  // les annonces s'empilaient — trois ou quatre requêtes en vol vers la même adresse.
+  let annonceEnCours = false;
   m.keepalive = setInterval(async () => {
+    if (annonceEnCours) return;
     if (vide(m.file)) {
       if (!videDepuis) videDepuis = Date.now();
       if (Date.now() - videDepuis > 15000) { clearInterval(m.keepalive ?? undefined); m.keepalive = null; L("sys", "keep-alive", "arrêté", m); return; }
     } else videDepuis = 0;
-    await postLocalReg(m);
+    annonceEnCours = true;
+    try { await postLocalReg(m); } finally { annonceEnCours = false; }
   }, 2500);
 }
 
@@ -1564,8 +1597,12 @@ function raw(res: ServerResponse, bodyStr: string, status = 200, type = "applica
   //
   // `type` n'existe que pour le multiplexeur : la vraie machine répond `text/json` sur
   // `/regtoken.json`, et se faire passer pour elle veut dire lui ressembler jusque-là.
+  //
+  // `nosniff` : une réponse d'API ne doit jamais être réinterprétée en HTML par un navigateur. Pas
+  // sur le type imposé par le multiplexeur : la vraie machine ne l'envoie pas, et lui ressembler
+  // est la règle de ce chemin-là.
   const buf = Buffer.from(bodyStr, "utf8");
-  res.writeHead(status, { "Content-Type": type, "Content-Length": buf.length });
+  res.writeHead(status, { "Content-Type": type, "Content-Length": buf.length, ...(type === "application/json" ? { "X-Content-Type-Options": "nosniff" } : {}) });
   res.end(buf);
 }
 /**
@@ -1578,7 +1615,7 @@ function raw(res: ServerResponse, bodyStr: string, status = 200, type = "applica
  * `ETag` évite de la retélécharger à chaque rendu d'une grille de cartes.
  */
 function rawBin(res: ServerResponse, buf: Buffer, type: string, entetes: Record<string, string> = {}) {
-  res.writeHead(200, { "Content-Type": type, "Content-Length": buf.length, ...entetes });
+  res.writeHead(200, { "Content-Type": type, "Content-Length": buf.length, "X-Content-Type-Options": "nosniff", ...entetes });
   res.end(buf);
 }
 
@@ -1587,12 +1624,51 @@ function rawBin(res: ServerResponse, buf: Buffer, type: string, entetes: Record<
  * navigateur — ou n'importe qui sur le réseau — qui les écrit, et chaque route les rétrécit avant
  * de s'en servir.
  */
-async function corpsJson(req: IncomingMessage): Promise<CorpsApi> {
-  return JSON.parse((await readBody(req)).toString("utf8") || "{}");
+async function corpsJson(req: IncomingMessage, max = CORPS_MAX): Promise<CorpsApi> {
+  const texte = (await readBody(req, max)).toString("utf8");
+  // Un corps illisible est une faute de l'APPELANT : 400, pas le 500 d'un `JSON.parse` qui lève.
+  try { return JSON.parse(texte || "{}"); } catch { throw new ErreurRequete(400, "corps JSON illisible"); }
 }
 type CorpsApi = { readonly [champ: string]: unknown };
 
-function readBody(req: IncomingMessage) { return new Promise<Buffer>((r) => { const c: Buffer[] = []; req.on("data", (x: Buffer) => c.push(x)); req.on("end", () => r(Buffer.concat(c))); }); }
+/** Une erreur qui porte son statut HTTP : les gestionnaires de `createServer` le rendent tel quel. */
+class ErreurRequete extends Error {
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
+}
+/** Rendu d'une exception non rattrapée : son statut si elle en porte un, 500 sinon. */
+const echecRequete = (res: ServerResponse) => (e: unknown) =>
+  raw(res, JSON.stringify({ error: errMsg(e) }), e instanceof ErreurRequete ? e.status : 500);
+
+/**
+ * **Plafond d'un corps de requête, vérifié AVANT de l'accumuler.** Sans lui, n'importe qui sur le
+ * réseau faisait tenir en mémoire un corps de taille arbitraire. 64 Kio couvrent tout ce que l'API,
+ * `/mcp` et la machine envoient ; les deux routes d'image ont leur propre plafond — une image en
+ * data URL base64 pèse 4/3 de ses octets, d'où 1,4 × `IMAGE_TAILLE_MAX`.
+ */
+const CORPS_MAX = 64 * 1024;
+const CORPS_MAX_IMAGE = Math.ceil(IMAGE_TAILLE_MAX * 1.4);
+/** Requêtes dont le corps a été refusé : leur connexion est coupée une fois le 413 parti (voir `createServer`). */
+const CORPS_REFUSES = new WeakSet<IncomingMessage>();
+
+function readBody(req: IncomingMessage, max = CORPS_MAX) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const refuser = () => {
+      // On cesse de lire : le reste du corps n'est jamais accumulé. Le 413 part par l'appelant, et la
+      // connexion est détruite juste après (`req.destroy()` sur `finish`) plutôt que vidée.
+      CORPS_REFUSES.add(req);
+      req.removeAllListeners("data");
+      req.pause();
+      reject(new ErreurRequete(413, `corps de requête trop volumineux (plafond ${max} octets)`));
+    };
+    if (Number(req.headers["content-length"]) > max) return refuser();
+    const c: Buffer[] = [];
+    let total = 0;
+    req.on("data", (x: Buffer) => { total += x.length; if (total > max) return refuser(); c.push(x); });
+    req.on("end", () => resolve(Buffer.concat(c)));
+    req.on("error", reject);
+  });
+}
 
 // --- handlers device-facing ---
 /**
@@ -1605,7 +1681,10 @@ async function handleLan(req: IncomingMessage, res: ServerResponse) {
   const body = await readBody(req);
   if (url === "/local_lan/key_exchange.json" && req.method === "POST") {
     const brut = body.toString("utf8").match(/"time_1"\s*:\s*"?(-?\d+)"?/);
-    const kx = JSON.parse(body.toString("utf8")).key_exchange;
+    // Un corps illisible ou sans `key_exchange` est un refus (400), pas une panne du serveur (500).
+    let kx;
+    try { kx = JSON.parse(body.toString("utf8")).key_exchange; } catch { kx = null; }
+    if (!kx || typeof kx !== "object") return raw(res, JSON.stringify({ error: "key_exchange illisible" }), 400);
     kx.time_1 = brut ? brut[1] : String(kx.time_1);
     if (kx.proto !== 1 || kx.ver !== 1) return raw(res, JSON.stringify({ error: "ver" }), 426);
     // L'adresse d'abord, le `key_id` en second : c'est le seul endroit où le protocole nous donne
@@ -1646,6 +1725,9 @@ async function handleLan(req: IncomingMessage, res: ServerResponse) {
   }
   if (url === "/local_lan/commands.json" && req.method === "GET") {
     if (!m.session) return raw(res, "no session", 412);
+    // Une visite est un contact au même titre qu'un datapaquet : sans cela une machine qui vient
+    // chercher ses commandes sans rien pousser passerait pour muette auprès du coupe-circuit.
+    contactMachine(m.file, Date.now());
     // Une visite, un pas — c'est ici que l'exclusion est matérialisée. Voir prochainePaquet().
     const { data, label, trame } = prochainePaquet(m);
     if (label !== "idle") L("out", "commande", label, m, trame);
@@ -1698,6 +1780,8 @@ const PROXY = {
 
 /** L'intervalle auquel nous allons chercher les commandes d'une application. */
 const PERIODE_SONDE_APP = 2000;
+/** Entrées du registre par adresse IP, au plus. Voir `handleAppReg`. */
+const MAX_APPS_PAR_IP = 8;
 
 const appsEtablies = () => [...PROXY.registre.apps.values()].filter((a) => a.etat === "etablie");
 
@@ -1767,7 +1851,13 @@ async function ouvrirSessionApp(m: Machine, app: AppBranchee) {
  */
 function armerSondeApp(m: Machine, app: AppBranchee) {
   desarmerSondeApp(app);
-  const timer = setInterval(() => { sonderApp(m, app).catch(() => {}); }, PERIODE_SONDE_APP);
+  // La machine est RELUE à chaque tour, jamais tenue par la fermeture : une remise à zéro remplace
+  // l'objet `Machine`, et la sonde continuait sinon sur l'ancien (clé, file, DSN périmés).
+  const timer = setInterval(() => {
+    const courante = machineById(app.machineId ?? m.id);
+    if (!courante) { retirerApp(app, null, "machine supprimée"); return; }
+    sonderApp(courante, app).catch(() => {});
+  }, PERIODE_SONDE_APP);
   timer.unref?.();
   PROXY.sondes.set(app.id, timer);
 }
@@ -1963,6 +2053,17 @@ async function accuserSiDemande(m: Machine, app: AppBranchee, intention: Extract
  * envoie un entier ; toute autre forme passe par `String()` — exactement la conversion que
  * `encodeURIComponent` lui appliquait déjà dans `cheminAvecCmd`, donc la même URL.
  */
+/**
+ * Une trame `0x83` en mode `STOPV2` — l'arrêt d'une préparation. Lue par `opTrame`, donc par la table
+ * d'`ecam-args.ts` : l'octet 5 porte le mode, son bit 0x80 n'étant que le drapeau de vérification.
+ */
+function estArret(ecamB64: unknown) {
+  try {
+    const { cmd, trame } = opTrame(ecamB64);
+    return cmd === 0x83 && ((trame[5] ?? 0) & 0x7f) === MODE.STOPV2;
+  } catch { return false; }
+}
+
 const cmdIdApp = (v: unknown): number | string => (typeof v === "number" || typeof v === "string" ? v : String(v));
 
 async function executerPourApp(m: Machine, app: AppBranchee, intention: IntentionApp) {
@@ -2096,7 +2197,9 @@ async function executerPourApp(m: Machine, app: AppBranchee, intention: Intentio
        * même, ce qui est exact — il porte le transport, pas l'exécution.
        */
       startProgram(m, trame, `App ${app.id} · ${decrite}`, 75000, "monitor", {
-        rang: RANG.COMMANDE,
+        // Un ARRÊT relayé part au rang URGENT, comme celui de `/api/command` : il agit sur une machine
+        // qui coule, et le laisser derrière la file le rendait inutile.
+        rang: estArret(trame) ? RANG.URGENT : RANG.COMMANDE,
         cle: cleFusion(trame),
         meta: { app: app.id },
         i18n: { k: "appWrite", p: { app: app.id, commande: decrite } },
@@ -2519,8 +2622,20 @@ async function handleAppReg(req: IncomingMessage, res: ServerResponse) {
     return raw(res, JSON.stringify({ error: "body" }), 400);
   }
 
+  // L'adresse annoncée doit être CELLE de l'appelant : c'est là que nous irons ouvrir une session et
+  // sonder. Sans ce contrôle, n'importe qui nous faisait frapper l'hôte de son choix.
+  if (reg.ip != null && String(reg.ip) !== from) {
+    refuser(PROXY.registre, { from, motif: "ipUsurpee", detail: String(reg.ip).slice(0, 64) }, Date.now());
+    return raw(res, JSON.stringify({ error: "ip" }), 400);
+  }
   const dsn = new URL(req.url ?? "", "http://x").searchParams.get("dsn");
   const existante = PROXY.registre.apps.get(cleApp(reg.ip ?? from, reg.port));
+  // Une adresse a droit à quelques entrées (plusieurs applications sur un téléphone, les `faux-app`
+  // de la démonstration), pas à une par port : chaque entrée arme une sonde toutes les 2 s.
+  if (!existante && [...PROXY.registre.apps.values()].filter((a) => a.ip === from).length >= MAX_APPS_PAR_IP) {
+    refuser(PROXY.registre, { from, motif: "tropDEntrees", detail: String(MAX_APPS_PAR_IP) }, Date.now());
+    return raw(res, JSON.stringify({ error: "too many" }), 429);
+  }
   const m = existante ? machineById(existante.machineId) : machinePourApp(dsn);
   if (!m) {
     // Refus explicite plutôt que rattachement au hasard : relayer vers la mauvaise cafetière est
@@ -2884,7 +2999,11 @@ function handleDataResponse(m: Machine, value: string) {
   // C'est LA réponse qu'attend un pas de trame de lecture (0xBA, 0xA3, 0xA2, monitor). Apparier ici
   // est ce qui fait avancer un balayage à la vitesse de la machine : six grains ne sont plus six
   // programmes espacés d'un `setTimeout(11000)` deviné, mais six pas qui s'enchaînent à la réponse.
-  apparier(m.file, { reponse: true }, Date.now());
+  //
+  // Apparié sur la COMMANDE que la réponse renvoie en écho (octet 2), comme `0x75` et `0xBA` : sans
+  // cela une réponse tardive à un pas expiré validait le pas suivant, qui attendait autre chose —
+  // des compteurs déclarés lus avec la réponse d'une somme de contrôle. Trame trop courte : rien.
+  if (buf.length >= 3) apparier(m.file, { reponse: true, cmd: buf[2] }, Date.now());
   if (buf[2] === 0xa2) {
     try {
       const pr = decodeParameters(value);
@@ -4564,6 +4683,11 @@ async function handleMachines(req: IncomingMessage, res: ServerResponse) {
     // Le keep-alive est un intervalle vivant : sans ça il continuerait à annoncer un serveur à une
     // machine qui n'existe plus, ou qui vient d'être vidée.
     if (m.keepalive) { clearInterval(m.keepalive); m.keepalive = null; }
+    // Même raison pour les applications du multiplexeur rattachées à cette machine : leur session
+    // est chiffrée avec une clé LAN qui part avec elle, et leur sonde visait l'objet effacé.
+    for (const app of PROXY.registre.apps.values()) {
+      if (app.machineId === m.id) retirerApp(app, m, "machine supprimée ou remise à zéro");
+    }
     const nom = machineLabel(m);
 
     /**
@@ -4710,6 +4834,8 @@ let sseTimer: ReturnType<typeof setTimeout> | null = null;
  * par abonné aurait acheté quelques octets contre un état à tenir par connexion.
  */
 let sseJournalCurseur = 0;
+/** Abonnés simultanés au flux, au plus. Large pour quelques onglets et téléphones, borné pour le reste. */
+const SSE_MAX = 32;
 
 /** Les lignes des deux bacs dont `n` dépasse `depuis`, dans l'ordre où elles sont arrivées. */
 function journalDepuis(depuis: number) {
@@ -4730,7 +4856,9 @@ const journalComplet = () => [...LOG, ...LOG_APPS].sort((a, b) => a.n - b.n);
  * le rattrapage ; en deçà, ou absent (0), la fenêtre entière marquée `complet`.
  */
 function buildJournalPayload(depuis: number) {
-  const rattrape = Number.isFinite(depuis) && depuis > 0 && depuis >= journalEvince;
+  // `depuis > journalSeq` : un curseur venu d'AVANT un redémarrage — la numérotation est repartie
+  // de zéro, un delta ne lui rendrait rien. Fenêtre entière, marquée `complet`.
+  const rattrape = Number.isFinite(depuis) && depuis > 0 && depuis >= journalEvince && depuis <= journalSeq;
   const lignes = rattrape ? journalDepuis(depuis) : journalComplet();
   return { lignes, complet: !rattrape, jusqu: lignes.length ? lignes[lignes.length - 1].n : journalSeq };
 }
@@ -4897,6 +5025,12 @@ function sseWatch() {
  * premier changement.
  */
 function sseSubscribe(req: IncomingMessage, res: ServerResponse) {
+  // Un abonné est une connexion tenue ouverte et un tampon par poussée : sans borne, n'importe qui
+  // sur le réseau en ouvrait autant qu'il voulait.
+  if (SSE.size >= SSE_MAX) return raw(res, JSON.stringify({ error: `trop d'abonnés au flux (${SSE_MAX})` }), 503);
+  // Personne n'était branché : le curseur commun n'a pas avancé depuis, et la première poussée
+  // relivrerait tout ce que l'amorce ci-dessous va déjà envoyer. Il repart d'ici.
+  if (!SSE.size) sseJournalCurseur = journalSeq;
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -4928,7 +5062,9 @@ function sseSubscribe(req: IncomingMessage, res: ServerResponse) {
    * dit (`complet`), pour qu'il remplace au lieu d'ajouter à une chronologie trouée.
    */
   const repris = Number(req.headers["last-event-id"]);
-  const reprise = Number.isFinite(repris) && repris > 0 && repris >= journalEvince;
+  // `repris <= journalSeq` : un navigateur resté ouvert pendant un redémarrage revient avec un
+  // curseur que la nouvelle numérotation n'a pas encore atteint — il lui faut la fenêtre entière.
+  const reprise = Number.isFinite(repris) && repris > 0 && repris >= journalEvince && repris <= journalSeq;
   sseEcrire(res, reprise ? cadreJournal(journalDepuis(repris), false) : cadreJournal(journalComplet(), true));
   sseBroadcast();
 }
@@ -5314,7 +5450,9 @@ function buildStatsPayload(m: Machine) {
         id: Number(id),
         key: sens.key,
         raw: stats[Number(id)].value,
-        value: sens.divisor ? Math.round(stats[Number(id)].value / sens.divisor) : stats[Number(id)].value,
+        // Au dixième, comme `valeurAffichee` (compteurs.ts) pour `d553_water_tot_qty` : les deux
+        // canaux portent la même quantité, et l'arrondi à l'entier effaçait jusqu'à 0,5 L.
+        value: sens.divisor ? Math.round((stats[Number(id)].value / sens.divisor) * 10) / 10 : stats[Number(id)].value,
         unit: sens.divisor ? "L" : null,
         at: stats[Number(id)].at,
       })),
@@ -5586,7 +5724,8 @@ function registerMcpTools(server: McpServer, tokenRow: JetonMcpResume) {
     // `temperature` / `aroma` finis, `flowTime` fini et dans [0, 120] — sinon un `flowTime` en
     // millisecondes (25000) passerait pour une réponse plausible au lieu d'être rejeté, comme un
     // décalage d'un octet dans une trame. `crema` / `taste` ne sont pas bornés côté HTTP non plus ;
-    // on ne leur impose donc rien de plus que d'être des nombres.
+    // on ne leur impose donc rien de plus que d'être des nombres : c'est `computeBeanAdapt` qui
+    // refuse ce qui n'est pas 1, 2 ou 3, et `defineMcpTool` traduit son exception en `isError`.
     inputSchema: {
       grinder: z.number().finite(), temperature: z.number().finite(), aroma: z.number().finite(),
       flowTime: z.number().finite().min(0).max(120), crema: z.number(), taste: z.number(),
@@ -5808,7 +5947,9 @@ async function renameProfile(m: Machine, b: { index?: unknown; name?: unknown; k
     throw new Error("écriture de noms non portée pour la génération Striker (pas de 22 octets)");
   }
   const nom = String(b.name ?? "");
-  if (nom.length > 20) throw new Error("nom limité à 20 caractères");
+  // 20 OCTETS UTF-16BE dans la trame, donc 10 unités `length` : au-delà, `frameSetNames` tronquait
+  // en silence et la machine portait un nom que personne n'avait tapé.
+  if (nom.length > 10) throw new Error("nom limité à 10 caractères (20 octets UTF-16 dans la trame)");
   const lus = readNames(m.store.machineView(), perso ? "customNames" : "profileNames");
   const icone = b.icon != null ? Number(b.icon) : lus[index]?.icon;
   if (typeof icone !== "number" || !Number.isInteger(icone)) {
@@ -6087,6 +6228,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
     const b = await corpsJson(req);
     const name = String(b.name ?? "").trim();
     if (!name) return raw(res, JSON.stringify({ error: "nom de jeton requis" }), 400);
+    if (name.length > 60) return raw(res, JSON.stringify({ error: "nom de jeton limité à 60 caractères" }), 400);
     const scopes = Array.isArray(b.scopes) ? b.scopes.filter((s) => typeof s === "string") : [];
     const valides = scopes.every((s) => {
       const [cat, nat] = s.split(":");
@@ -6197,8 +6339,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
       const nom = String(rec.name ?? "").trim();
       if (!nom) return raw(res, JSON.stringify({ error: "recette sans nom : c'est lui qui nommerait l'emplacement" }), 400);
       // Tronquer serait pire que refuser : l'emplacement porterait un nom que l'utilisateur n'a pas
-      // choisi, et la trame en compte exactement 20.
-      if (nom.length > 20) return raw(res, JSON.stringify({ error: "nom limité à 20 caractères" }), 400);
+      // choisi, et la trame en compte exactement 20 OCTETS UTF-16BE — soit 10 caractères.
+      if (nom.length > 10) return raw(res, JSON.stringify({ error: "nom limité à 10 caractères (20 octets UTF-16 dans la trame)" }), 400);
       const plan = planTransfert({ params: rec.params, cibleParams: cible.ingredients });
       if (!plan.possible) {
         return raw(res, JSON.stringify({
@@ -6290,7 +6432,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
         checksumBefore = m.store.getMeta<SommesControle>("checksums")?.profiles?.[prof] ?? null;
       }
       else if (b.action === "selectProfile") {
-        m.activeProfile = Number(b.profileId ?? 1);
+        // Validé AVANT d'être adopté : un `NaN` ou un 9 atteignait `m.activeProfile`, puis la trame.
+        const prof = Number(b.profileId ?? 1);
+        if (!Number.isInteger(prof) || prof < 1 || prof > m.catalog.model.nProfiles) {
+          return raw(res, JSON.stringify({ error: `profil ${b.profileId} invalide (1–${m.catalog.model.nProfiles})` }), 400);
+        }
+        m.activeProfile = prof;
         m.activeProfileConfirmed = true;
         rememberActiveProfile(m);
         sustain = "profile";
@@ -6302,7 +6449,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
         dur = 10000;
         refreshOrderFor = m.activeProfile;
       }
-      else if (b.action === "selectBean") { frame = frameSelectBean(Number(b.beanId ?? 1)); label = `Bean ${b.beanId}`; cleLibelle = { k: "selectBean", p: { index: Number(b.beanId ?? 1) } }; dur = 20000; }
+      else if (b.action === "selectBean") {
+        // Les six emplacements Bean System ; un autre index serait masqué sur un octet et partirait.
+        const grain = Number(b.beanId ?? 1);
+        if (!Number.isInteger(grain) || grain < 1 || grain > 6) return raw(res, JSON.stringify({ error: `grain ${b.beanId} invalide (1–6)` }), 400);
+        frame = frameSelectBean(grain); label = `Bean ${grain}`; cleLibelle = { k: "selectBean", p: { index: grain } }; dur = 20000;
+      }
       else if (b.action === "stop") { frame = frameDispense(Number(b.beverageId ?? 1), Number(b.profileId ?? 1), MODE.STOPV2, ACT.PREPARE, []); label = "Arrêt"; cleLibelle = { k: "stop" }; dur = 15000; }
       // `executeDispense` fait tout — trame, mise en file, `postLocalReg` — donc cette branche
       // renvoie directement au lieu de retomber dans la queue commune plus bas. Seule
@@ -6650,7 +6802,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
     });
   }
   if (url === "/api/beanpresets" && req.method === "POST") {
-    const b = await corpsJson(req);
+    const b = await corpsJson(req, CORPS_MAX_IMAGE); // peut porter une photo en data URL
     const grinder = Number(b.grinder);
     const temperature = Number(b.temperature);
     const aroma = Number(b.aroma);
@@ -6730,7 +6882,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (url === "/api/beans/visual" && req.method === "POST") {
-    const b = await corpsJson(req);
+    const b = await corpsJson(req, CORPS_MAX_IMAGE); // porte la photo en data URL
     const index = Number(b.index);
     /* Les six emplacements, et pas l'index 0 : ce n'est pas un café mais l'interrupteur
        « Bean Adapt (ON/OFF) », et lui donner une photo de paquet serait décrire un objet qui
@@ -6829,7 +6981,13 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
     if (!Number.isFinite(flowTime) || flowTime < 0 || flowTime > 120) {
       return raw(res, JSON.stringify({ error: "temps d'écoulement invalide" }), 400);
     }
-    return raw(res, JSON.stringify(computeBeanAdapt(current, { flowTime, crema: Number(b.crema), taste: Number(b.taste) })));
+    // `computeBeanAdapt` lève sur une réponse hors de {1, 2, 3} : un refus d'entrée, pas une panne —
+    // 400 avec sa phrase, qui nomme la réponse fautive, comme `/api/beanadapt/creation` juste dessous.
+    try {
+      return raw(res, JSON.stringify(computeBeanAdapt(current, { flowTime, crema: Number(b.crema), taste: Number(b.taste) })));
+    } catch (e) {
+      return raw(res, JSON.stringify({ error: errMsg(e) }), 400);
+    }
   }
 
   /**
@@ -7151,6 +7309,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse) {
     // Même raison qu'au balayage des grains : la file encaisse au lieu d'écraser, donc plus de refus.
     let queue: { id: number; qty: number }[] = [];
     if (Array.isArray(b.ids) && b.ids.length) {
+      // Même plafond que `qty` : un pas par identifiant, et chaque pas coûte une visite de la machine.
+      if (b.ids.length > 40) return raw(res, JSON.stringify({ error: `40 identifiants au plus par demande (${b.ids.length} fournis)` }), 400);
       queue = b.ids.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 0xffff).map((id: number) => ({ id, qty: 1 }));
     } else if (Number.isInteger(Number(b.from))) {
       const qty = Math.min(Math.max(Number(b.qty ?? 1), 1), 40);
@@ -7278,28 +7438,84 @@ for (const m of loadMachines()) {
   if (!m.lanKey.length) L("sys", "clé LAN", "absente : la renseigner dans .env.local, ou la faire découvrir depuis la page « Machines » (compte De'Longhi)", m);
 }
 
+/**
+ * **Garde navigateur de `/api/*` et `/mcp` — contre le CSRF et le rebinding DNS.**
+ *
+ * L'API n'a pas d'authentification (voir AGENTS.md) : une page web quelconque ouverte sur le même
+ * réseau pouvait donc lui faire préparer un café par un simple formulaire, ou la lire en
+ * rebindant son propre nom de domaine sur notre adresse. Trois refus, dans cet ordre :
+ *
+ * - **`Host` hors liste blanche** (403) : un rebinding DNS arrive forcément sous le nom de
+ *   l'attaquant. Littéraux IP, `localhost`, `*.local`, SERVER_IP et ALLOWED_HOSTS passent. Un
+ *   `Host` ABSENT passe aussi : aucun navigateur n'en émet, ce n'est pas le vecteur visé.
+ * - **`Origin` étrangère sur une requête mutante** (403) : un navigateur l'envoie sur toute requête
+ *   inter-origines, et un client hors navigateur (curl, MCP) ne l'envoie pas — il passe.
+ * - **corps mutant non JSON** (415) : un formulaire HTML ne sait pas poser `application/json`,
+ *   et poser cet en-tête depuis une autre origine déclenche un preflight que nous ne servons pas.
+ *
+ * Ne s'applique PAS aux chemins de la machine et des applications (`/local_lan`, `/regtoken.json`,
+ * `/local_reg.json`, OTA) : aucun navigateur n'y parle, et la machine ne choisit pas ses en-têtes.
+ */
+const METHODES_MUTANTES = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+function hoteAutorise(hote: string) {
+  // `[::1]:3000` → `::1` ; `cafe.local:3000` → `cafe.local` ; point final DNS ignoré.
+  const v6 = /^\[([^\]]+)\](?::\d+)?$/.exec(hote);
+  const nom = (v6 ? v6[1] : hote.replace(/:\d+$/, "")).toLowerCase().replace(/\.$/, "");
+  return isIP(nom) !== 0 || nom === "localhost" || nom.endsWith(".local")
+    || nom === CFG.serverIp?.toLowerCase() || CFG.allowedHosts.includes(nom);
+}
+function gardeNavigateur(req: IncomingMessage): { status: number; error: string } | null {
+  const hote = req.headers.host;
+  if (hote !== undefined && !hoteAutorise(hote)) {
+    return { status: 403, error: `hôte « ${hote} » non autorisé : ajouter ce nom à ALLOWED_HOSTS (liste séparée par des virgules), ou passer par l'adresse IP` };
+  }
+  if (!METHODES_MUTANTES.has(req.method ?? "")) return null;
+  const origine = req.headers.origin;
+  if (origine !== undefined) {
+    // `new URL` des deux côtés : normalise la casse et le port par défaut (`:80`). `Origin: null`
+    // (iframe sandboxée, fichier local) ne se lit pas comme une URL, donc est refusée.
+    let memeHote = false;
+    try { memeHote = new URL(origine).host === new URL(`http://${hote ?? ""}`).host; } catch { /* refus ci-dessous */ }
+    if (!memeHote) return { status: 403, error: `origine « ${origine} » refusée : une requête qui modifie quelque chose doit venir de l'interface servie ici` };
+  }
+  const avecCorps = Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined;
+  if (avecCorps && !/^application\/json\s*(;|$)/i.test(req.headers["content-type"] ?? "")) {
+    return { status: 415, error: `corps refusé : Content-Type application/json attendu (reçu « ${req.headers["content-type"] ?? "aucun"} »)` };
+  }
+  return null;
+}
+
 createServer((req, res) => {
   const u = req.url || "";
+  // Un corps refusé par `readBody` n'est pas vidé : la connexion est coupée dès la réponse partie.
+  res.once("finish", () => { if (CORPS_REFUSES.has(req)) req.destroy(); });
   // La machine réclame une image OTA à notre serveur (voir m.otaRequests). On ne lui en sert
   // aucune — on enregistre l'événement, qui est le seul indicateur local d'un OTA en attente.
   if (u.startsWith("/ota_status.json") || u.startsWith("/local_lan/lan_ota")) {
     // Attribuée à la machine qui l'a émise ; une requête d'un appareil non reconnu est journalisée
     // sans être rangée nulle part, plutôt que mise au compte de la première machine.
     const m = machineByPeer(req);
+    // Tronquée : l'URL vient du réseau, et une URL de plusieurs Kio noierait journal et état.
+    const urlOta = u.slice(0, 200);
     if (m) {
-      m.otaRequests.unshift({ at: Date.now(), url: u, method: req.method, from: peerAddress(req) });
+      m.otaRequests.unshift({ at: Date.now(), url: urlOta, method: req.method, from: peerAddress(req) });
       if (m.otaRequests.length > 20) m.otaRequests.pop();
     }
-    L("in", "OTA", `${m ? "" : ` d'un appareil non reconnu (${peerAddress(req)})`} : ${req.method} ${u}`, m);
+    L("in", "OTA", `${m ? "" : ` d'un appareil non reconnu (${peerAddress(req)})`} : ${req.method} ${urlOta}`, m);
     return raw(res, JSON.stringify({ ota: "none" }), 404);
   }
   // Les deux endpoints que sert une VRAIE machine à un client local. Ils n'existent que si le
   // multiplexeur est allumé : voir PROXY, et la raison pour laquelle il est éteint par défaut.
-  if (PROXY.actif && u.split("?")[0] === "/regtoken.json") return handleAppRegtoken(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
-  if (PROXY.actif && u.split("?")[0] === "/local_reg.json") return handleAppReg(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
-  if (u.startsWith("/local_lan/")) return handleLan(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
-  if (u === "/mcp" || u.startsWith("/mcp?")) return handleMcp(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
-  if (u.startsWith("/api/")) return handleApi(req, res).catch((e) => raw(res, JSON.stringify({ error: e.message }), 500));
+  if (PROXY.actif && u.split("?")[0] === "/regtoken.json") return handleAppRegtoken(req, res).catch(echecRequete(res));
+  if (PROXY.actif && u.split("?")[0] === "/local_reg.json") return handleAppReg(req, res).catch(echecRequete(res));
+  if (u.startsWith("/local_lan/")) return handleLan(req, res).catch(echecRequete(res));
+  const mcp = u === "/mcp" || u.startsWith("/mcp?");
+  if (mcp || u.startsWith("/api/")) {
+    const refus = gardeNavigateur(req);
+    if (refus) return raw(res, JSON.stringify({ error: refus.error }), refus.status);
+  }
+  if (mcp) return handleMcp(req, res).catch(echecRequete(res));
+  if (u.startsWith("/api/")) return handleApi(req, res).catch(echecRequete(res));
   return handle(req, res);
 }).listen(CFG.port, "0.0.0.0", () => {
   const liste = machineList();
