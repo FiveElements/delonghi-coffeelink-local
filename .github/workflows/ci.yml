@@ -51,9 +51,9 @@ jobs:
 
       # `server.mjs` et les modules de `src/lib` ne passent pas par TypeScript — `tsconfig.json`
       # n'inclut que les `.ts`/`.tsx` — alors qu'ils constituent le serveur RÉEL ; les copies `.ts`
-      # sont shadowées et ne tournent pas. `node --check` attrape la syntaxe, ESLint (étape
+      # sont shadowées et ne tournent pas. `node --check` attrape la syntaxe, oxlint (étape
       # suivante) le reste. Les deux, parce qu'ils ne voient pas la même chose : `node --check`
-      # couvre aussi les fichiers qu'ESLint pourrait ne pas atteindre si sa configuration dérivait.
+      # couvre aussi les fichiers qu'oxlint pourrait ne pas atteindre si sa configuration dérivait.
       - name: Vérifier la syntaxe des modules ESM
         run: |
           for f in server.mjs src/lib/*.mjs; do
@@ -61,14 +61,11 @@ jobs:
             node --check "$f"
           done
 
-      # ESLint 10, configuration plate. Il ne couvre QUE les `.mjs` : voir `eslint.config.mjs`,
-      # qui explique pourquoi les `.ts`/`.tsx` sont hors de portée (TypeScript 7 n'expose plus
-      # l'API compilateur dont `typescript-eslint` a besoin) et pourquoi ce n'est pas un manque —
-      # ce côté-là est déjà couvert par `tsc --noEmit` ci-dessus.
-      #
-      # Avant cette étape, `pnpm lint` valait `next lint`, une commande supprimée par Next 16 et
-      # qui de toute façon n'avait jamais rien vérifié : il n'y a jamais eu d'ESLint dans ce dépôt.
-      - name: Linter les modules ESM
+      # oxlint (`.oxlintrc.json`), avertissements compris (`--deny-warnings`). Il couvre TOUT le
+      # dépôt — `.mjs`, `.ts`, `.tsx` — parce qu'il analyse TypeScript avec son propre parseur.
+      # ESLint, qu'il remplace, ne voyait que les `.mjs` : il lui fallait `typescript-eslint`, qui
+      # appelle l'API compilateur que TypeScript 7 n'exporte plus.
+      - name: Linter (oxlint)
         run: pnpm lint
 
       # Ce que ce dépôt sait prouver SANS la machine. Toutes ces parties sont PURES par
@@ -226,7 +223,7 @@ jobs:
       - name: Vérifier le serveur MCP (catalogue, authentification, portée)
         run: node scripts/verif-mcp.mjs
 
-      # Les surfaces, dans un vrai navigateur — la seule chose que ni tsc, ni ESLint, ni les onze
+      # Les surfaces, dans un vrai navigateur — la seule chose que ni tsc, ni oxlint, ni les onze
       # vérifications pures ne regardent. Il existe pour la migration vers shadcn : le piège de
       # focus d'un <dialog>, la fermeture par Échap et l'échelle imprimée d'un curseur étaient des
       # propriétés de la PLATEFORME et deviennent du code, donc des choses à prouver.

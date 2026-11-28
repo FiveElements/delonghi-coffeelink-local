@@ -14,7 +14,7 @@
     "build": "next build",
     "start": "node server.mjs",
     "serve": "node server.mjs",
-    "lint": "eslint ."
+    "lint": "oxlint --deny-warnings"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -31,15 +31,13 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.3.5",
     "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "c8": "^12.0.0",
-    "eslint": "^10.15.0",
     "fast-check": "^4.11.0",
-    "globals": "^17.14.0",
+    "oxlint": "1.95.0",
     "puppeteer-core": "^25.18.1",
     "shadcn": "^4.23.0",
     "tailwindcss": "^4.3.5",

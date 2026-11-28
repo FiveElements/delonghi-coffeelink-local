@@ -12,7 +12,6 @@ import {
   valeurSure,
   type BeanSystem,
   type Beverage,
-  type Param,
   type RecipeParam,
 } from "./beverage";
 import { mfetch } from "./machine";

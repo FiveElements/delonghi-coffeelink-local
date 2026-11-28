@@ -89,7 +89,7 @@ Node **≥ 26** (the store uses native `node:sqlite`), pnpm 12 (pinned by `packa
 pnpm install
 pnpm dev        # node server.mjs --dev  — Next HMR for pages, raw HTTP for device endpoints
 pnpm build && pnpm start
-pnpm lint       # ESLint 10, .mjs only (see § Lint)
+pnpm lint       # oxlint, the whole repo: .mjs, .js, .ts, .tsx (see § Lint)
 node_modules/.bin/tsc --noEmit
 for f in server.mjs src/lib/*.mjs; do node --check "$f"; done
 ```
@@ -352,7 +352,7 @@ catalog is one model's, shared by all — a mismatch is reported, not corrected.
 
 `d270_serialnumber` characters 1–5 index the manufacturer table (`0132217055` → `17055` →
 ECAM 610.75.MB) — no cloud involved. `machine-models.json`, `machine-catalogs.json` and
-`beverage-images.json` are **generated** by `scripts/extract-*.mjs` from the APK (ESLint ignores the
+`beverage-images.json` are **generated** by `scripts/extract-*.mjs` from the APK (oxlint ignores the
 first two). Never hand-edit them; change the script. **Two more are generated from a *network*
 source**, and each has an offline replay flag so the decoding can be re-checked without calling out
 again: `bean-images.json` from De'Longhi's questionnaire S3 (`scripts/import-bean-images.mjs
@@ -481,13 +481,24 @@ more, which is why "Le grain" and "Réglages" are real named groups and not deco
 
 ## Lint
 
-ESLint 10 flat config, `.mjs` **only** — that is where the hole was: `tsconfig.json` includes only
-`.ts`/`.tsx`, so the files that actually run had no checking beyond `node --check`. The `.tsx` side
-is covered by `tsc --noEmit`.
+oxlint (`.oxlintrc.json`, JSON with comments), run as `oxlint --deny-warnings`: a warning fails like
+an error. It replaced ESLint 10 for one reason: **oxlint parses TS/TSX natively**. ESLint needs
+`typescript-eslint`, which calls the classic compiler API that TypeScript 7 (the native port) no
+longer exports, and whose peer range excludes 7 — so under ESLint only the `.mjs` could be linted.
+Now the whole repo is, and `react-hooks/rules-of-hooks` + `exhaustive-deps` finally reach the pages.
+`tsconfig.json` still includes only `.ts`/`.tsx`: for `server.mjs` and `src/lib/*.mjs`, oxlint
+(with `no-undef` on) and `node --check` remain the only static net.
 
-⚠️ **Do not add `typescript-eslint`.** TypeScript 7 (the native port) no longer exports the classic
-compiler API it needs, and its peer range excludes 7. The install succeeds; the analysis fails on
-the first line of TSX. The full reasoning is in the header of `eslint.config.mjs`.
+Every rule turned off in `.oxlintrc.json` carries its reason next to it — three React Compiler rules
+(the compiler is not enabled here) and `unicorn/no-new-array` (the frame constructors' idiom).
+Exceptions are written `// oxlint-disable-next-line <rule>`. The native binary comes through
+`optionalDependencies` (`@oxlint/binding-*`), with no install script — nothing to allow in
+`pnpm-workspace.yaml`.
+
+⚠️ **A component declared inside a render is a new type on every render**, so React remounts it.
+`react/static-components` caught four in `/pilotage` and `/statistiques`, including three
+`role="status"` regions whose whole point was to stay mounted. Such helpers are called as
+functions (`{statut("power")}`), never mounted as `<Statut />`.
 
 ## Secrets and data hygiene
 

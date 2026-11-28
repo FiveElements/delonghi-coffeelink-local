@@ -303,7 +303,7 @@ export default function Recipes() {
 
   const bevLibre = useMemo(
     () => (supportLibre ? declarationLibre(supportLibre) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
     [supportLibre, bornesLarges],
   );
 

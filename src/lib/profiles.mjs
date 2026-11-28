@@ -137,7 +137,7 @@ function decodeUtf16be(buf) {
   // Le caractère de contrôle est VOLONTAIRE : c'est le remplissage à zéro du bloc de noms, et
   // c'est exactement ce que cette expression retire. Voir la règle des unités de 2 octets
   // ci-dessus, qui est ce qui empêche `swap16()` de lever sur un tampon de longueur impaire.
-  // eslint-disable-next-line no-control-regex
+  // oxlint-disable-next-line no-control-regex
   return swapped.toString("utf16le").replace(/\u0000+$/, "").trim();
 }
 

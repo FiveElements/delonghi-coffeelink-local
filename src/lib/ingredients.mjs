@@ -8,9 +8,9 @@
  * avait fini par exister trois fois.
  *
  * ⚠️ **Il vit donc en `.mjs` sous `src/lib/`, pas en `.ts` sous `src/app/`** : `server.mjs`
- * l'importe, et un module TypeScript ne lui serait pas atteignable. Le prix est qu'il échappe à
- * ESLint (qui ne voit que les `.mjs` de la racine et de `scripts/`) tout en restant couvert par
- * `tsc`, qui le suit depuis les `.tsx` qui l'importent grâce à `allowJs`.
+ * l'importe, et un module TypeScript ne lui serait pas atteignable. Il reste couvert par oxlint,
+ * comme tout le dépôt, et par `tsc`, qui le suit depuis les `.tsx` qui l'importent grâce à
+ * `allowJs`.
  *
  * ## Une quantité nulle veut dire « absent », et l'option qui en dépend vaut 255
  *

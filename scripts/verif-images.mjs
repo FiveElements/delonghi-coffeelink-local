@@ -31,7 +31,7 @@
  * dans `next.config.mjs` : tout marche jusqu'à la prochaine ré-extraction, après quoi plus rien
  * n'est mis en cache, sans erreur ni message. Une empreinte périmée dans la table : les URL
  * pointent vers un jeu qui n'existe plus, et le cache est promis pour un an à des dessins qu'on
- * n'a pas. Ni `tsc`, ni `eslint`, ni `pnpm build` n'en disent un mot.
+ * n'a pas. Ni `tsc`, ni `oxlint`, ni `pnpm build` n'en disent un mot.
  *
  * **Ce qu'il voit sans les images.** `public/boissons/` est gitignoré — la CI n'en a aucune. Les
  * quatre premiers contrôles ne portent donc que sur le code et la table, et passent partout. Le

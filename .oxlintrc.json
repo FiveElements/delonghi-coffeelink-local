@@ -1,0 +1,70 @@
+// oxlint — remplace ESLint 10 (et son `eslint.config.mjs`).
+//
+// POURQUOI oxlint : il analyse TypeScript et TSX avec son propre parseur (oxc), sans
+// `typescript-eslint`. Or celui-ci appelle l'API classique du compilateur, que TypeScript 7 (le
+// portage natif) n'exporte plus (`createSourceFile`, `SyntaxKind`… absents), et sa plage de pairs
+// exclut 7. Sous ESLint, les `.ts`/`.tsx` étaient donc STRUCTURELLEMENT hors de portée et seuls
+// les `.mjs` étaient lintés. Ici tout le dépôt l'est — `.mjs`, `.js`, `.ts`, `.tsx` — et
+// `react-hooks` (rules-of-hooks, exhaustive-deps) s'applique enfin aux pages.
+//
+// Les commentaires d'exception s'écrivent `// oxlint-disable-next-line <règle>`.
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "react", "import"],
+  "categories": { "correctness": "error" },
+  "env": { "builtin": true, "es2024": true, "node": true },
+  "ignorePatterns": [
+    ".next/**",
+    "node_modules/**",
+    "data/**",
+    "out/**",
+    // Outillage local de l'éditeur, hors dépôt.
+    ".claude/**",
+    // Sorties extraites de l'APK : régénérées par `scripts/extract-*.mjs`, jamais éditées à la main.
+    "src/lib/machine-catalogs.json",
+    "src/lib/machine-models.json"
+  ],
+  "rules": {
+    // Le paramètre inutilisé est toléré (une signature de rappel l'impose), la variable inutilisée
+    // non : c'est presque toujours un reste de refactor. `catch {}` sans liaison est l'idiome ici.
+    "no-unused-vars": ["error", { "args": "none", "caughtErrors": "none", "varsIgnorePattern": "^_" }],
+    // Trames binaires et tables de protocole : une clé dupliquée fait disparaître la première en
+    // silence — la classe de bogue la plus coûteuse de ce dépôt, et la plus invisible en relecture.
+    "no-dupe-keys": "error",
+    "no-fallthrough": "error",
+    // `catch {}` vide est délibéré (« au mieux » : fermer une base, tenter un ROLLBACK…). Un `if`
+    // ou une boucle vides restent des fautes.
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    // Hors catégorie `correctness` chez oxlint, mais c'est ce qu'ESLint attrapait dans les `.mjs`,
+    // que `tsc` ne voit pas. Coupée pour `.ts`/`.tsx` plus bas : `tsc` le fait mieux.
+    "no-undef": "error",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "error",
+    // `new Array(n).fill(0)` est l'idiome des constructeurs de trames (`server.mjs`, `ecam.ts`) :
+    // `n` y est toujours un entier calculé, l'ambiguïté que la règle redoute n'existe pas.
+    "unicorn/no-new-array": "off",
+    // Les trois suivantes sont des règles du React Compiler, que ce projet n'active pas. Elles
+    // visent des idiomes employés ici à dessein : `Date.now()` au rendu, rafraîchi par un battement
+    // (`purity`) ; la « ref du dernier rappel » de `events.ts` (`refs`) ; un `setState` dans un
+    // effet qui réagit à une donnée chargée (`set-state-in-effect`, 14 sites). Les réécrire serait
+    // une refonte de l'UI, pas une correction.
+    "react/purity": "off",
+    "react/refs": "off",
+    "react/set-state-in-effect": "off"
+  },
+  "overrides": [
+    {
+      // Le côté TypeScript : globales du navigateur, et `no-undef` laissé à `tsc --noEmit`.
+      "files": ["**/*.ts", "**/*.tsx"],
+      "env": { "browser": true },
+      "rules": { "no-undef": "off" }
+    },
+    {
+      // Fichier Node qui contient du code de NAVIGATEUR : les rappels de `page.evaluate()` sont
+      // sérialisés et exécutés dans l'onglet. Pour ce seul fichier — ailleurs dans `scripts/`, un
+      // `document` serait une vraie faute.
+      "files": ["scripts/verif-surfaces.mjs"],
+      "env": { "browser": true }
+    }
+  ]
+}

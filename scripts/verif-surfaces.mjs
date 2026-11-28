@@ -1,6 +1,6 @@
 /**
  * Vérifie **les surfaces**, dans un vrai navigateur — la seule chose de ce dépôt que ni `tsc`, ni
- * ESLint, ni les onze vérifications pures ne regardent.
+ * oxlint, ni les onze vérifications pures ne regardent.
  *
  * Il existe pour une migration précise : les surfaces passent du CSS écrit à la main aux composants
  * shadcn, et trois comportements qui étaient jusqu'ici des propriétés de la PLATEFORME deviennent
@@ -688,7 +688,7 @@ try {
    * **Une trame lue que la carte ne montre pas est une lecture perdue.** Le panneau technique lisait
    * `bev.bounds ?? bev.values` : dès que les bornes étaient là, la trame de VALEURS (`0xA6`) — la
    * recette du profil, lue et enregistrée — n'apparaissait nulle part. Invisible à `tsc` comme à
-   * `eslint` : le `??` est parfaitement typé.
+   * `oxlint` : le `??` est parfaitement typé.
    */
   await test("les DEUX trames lues sont sur la carte — bornes ET valeurs", async () => {
     const page = await navigateur.newPage();
@@ -720,7 +720,7 @@ try {
    * 1. **Un `RadioGroupItem` de Radix est un `<button>`.** Son nom accessible vient de son CONTENU.
    *    Retirer le libellé visible sous l'image — parce qu'« on voit bien le grain » — produirait
    *    cinq boutons annoncés « bouton », en silence : la page s'affiche, le clic marche, et le
-   *    choix devient inutilisable au lecteur d'écran. `tsc` et `eslint` n'en disent rien.
+   *    choix devient inutilisable au lecteur d'écran. `tsc` et `oxlint` n'en disent rien.
    * 2. **Les flèches déplacent le choix.** C'est le service que rendaient les `<input
    *    type="radio">` natifs et la seule raison de garder un groupe Radix plutôt que cinq boutons :
    *    si la navigation aux flèches disparaît, le rail reste beau et cesse d'être un choix.
@@ -858,7 +858,7 @@ try {
    * pas — le piège de focus, Échap, l'inertie du fond — plus deux choses propres au parcours : la
    * mesure reprise à l'ouverture, et un groupe de boutons radio écrit à la main.
    *
-   * Aucune de ces affirmations n'est visible de `tsc` ni d'ESLint : ce sont des états d'exécution.
+   * Aucune de ces affirmations n'est visible de `tsc` ni d'oxlint : ce sont des états d'exécution.
    */
   console.log("\nAffiner les paramètres — la commande, puis le parcours en quatre étapes");
 
@@ -1171,7 +1171,7 @@ try {
   await test("les deux réponses changent les chiffres proposés", async () => {
     /* L'affirmation centrale de l'écran. Une règle qui ignorerait une question rendrait des valeurs
        parfaitement plausibles, et c'est pour ça que rien d'autre ne l'attraperait : ni `tsc`, ni
-       ESLint, ni l'œil. Vérifié de bout en bout — la réponse cliquée, la requête, le tableau — et
+       oxlint, ni l'œil. Vérifié de bout en bout — la réponse cliquée, la requête, le tableau — et
        non sur la fonction pure, que `verif-bean-adapt.mjs` couvre déjà.
 
        Deux grains opposés : arabica clair contre robusta très foncé. Si les trois chiffres
@@ -1269,7 +1269,7 @@ try {
      *    la largeur minimale du tableau l'étirait à 568 px dans une boîte de 510, et tout débordait
      *    à droite. Le tableau doit défiler dans son `.tableWrap`, pas le dialogue.
      *
-     * Aucune des trois ne se voit de `tsc`, d'ESLint ni d'un rendu de composant isolé.
+     * Aucune des trois ne se voit de `tsc`, d'oxlint ni d'un rendu de composant isolé.
      */
     const page = await navigateur.newPage();
     await jusquAuTableau(page, 1, 2);
@@ -1314,7 +1314,7 @@ try {
    *
    * Deux faces dans le même DOM, dont une invisible. `backface-visibility` ne cache qu'à l'ŒIL :
    * la face retournée reste tabulable et lisible par un lecteur d'écran si rien ne l'en empêche.
-   * C'est exactement le genre de défaut qu'aucun outil statique ne voit — `tsc` compile, ESLint
+   * C'est exactement le genre de défaut qu'aucun outil statique ne voit — `tsc` compile, oxlint
    * passe, la page s'affiche, et le clavier traverse une carte que personne ne regarde.
    *
    * Trois affirmations, et chacune tomberait pour sa propre raison : `inert` retiré, `aria-hidden`
@@ -1674,7 +1674,7 @@ try {
         couches.push(courant.trim());
         return {
           panneau: getComputedStyle(document.body).backgroundColor,
-          couches: couches.filter((c) => !/^rgba\(0, 0, 0, 0\)/.test(c)),
+          couches: couches.filter((c) => !c.startsWith("rgba(0, 0, 0, 0)")),
         };
       });
       vrai(m, "aucune touche de boisson sur la page d'accueil");

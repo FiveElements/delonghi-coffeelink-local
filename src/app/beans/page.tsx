@@ -199,8 +199,6 @@ export default function Beans() {
     return () => clearInterval(id);
   }, [live, scanning, refresh]);
 
-  const bean = data?.beans.find((b) => b.index === selected) ?? null;
-
   /** Lit un profil sur la machine (commande 0xBA) puis rafraîchit. */
   const read = async (index: number) => {
     setBusy(true);
@@ -557,8 +555,6 @@ export default function Beans() {
       setBusy(false);
     }
   };
-
-  const b = data?.bounds;
 
   /**
    * Les marques d'un emplacement. `null` quand il n'y en a aucune, pour que la rangée ne soit pas

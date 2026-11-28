@@ -206,7 +206,7 @@ const charger = (nom) =>
   const lib = (x) => x.switches[0]?.label ?? "";
   ok("molette nettoyage : libellé « carafe à lait (nettoyage) »", lib(t[0]) === "carafe à lait (nettoyage)", lib(t[0]));
   ok("molette hors nettoyage : libellé « carafe à lait (mousse) »", lib(t[1]) === "carafe à lait (mousse)", lib(t[1]));
-  ok("les deux libellés nomment la carafe", [lib(t[0]), lib(t[1])].every((l) => /^carafe à lait /.test(l)));
+  ok("les deux libellés nomment la carafe", [lib(t[0]), lib(t[1])].every((l) => l.startsWith("carafe à lait ")));
 }
 
 // ── Ce que les QUATRE preparations disent des bits carafe, et de l'alarme de nettoyage ───────

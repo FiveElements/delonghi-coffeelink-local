@@ -315,7 +315,7 @@ export default function Dashboard() {
    * Le rang d'une tâche : c'est lui qui explique l'ordre affiché. Sans lui, voir « Arrêt » passer
    * devant un balayage lancé bien avant ressemble à un défaut plutôt qu'à une règle.
    */
-  const Rang = ({ n }: { n: number }) => (
+  const rang = (n: number) => (
     <Badge variant={n === 0 ? "arret" : "plaque"}>{t(("rank" + n) as any)}</Badge>
   );
 
@@ -323,8 +323,13 @@ export default function Dashboard() {
    * `role="status"` permanent, jamais monté à la demande : un conteneur inséré en même temps que
    * son texte n'est pas annoncé par les lecteurs d'écran. Vide, `.status:empty` le masque, donc la
    * carte ne porte pas une boîte creuse en attendant.
+   *
+   * ⚠️ **Appelé comme une fonction (`{statut("power")}`), jamais monté comme `<Statut />`.** Un
+   * composant déclaré DANS le rendu est un nouveau type à chaque rendu : React démonte et remonte
+   * alors le `role="status"` à chaque passage, ce qui annulait précisément le « monté en
+   * permanence » ci-dessous. Vu par oxlint (`react/static-components`).
    */
-  const Statut = ({ scope }: { scope: Scope }) => (
+  const statut = (scope: Scope) => (
     <p className={"status " + (report?.scope === scope && report.kind === "err" ? "err" : "ok")} role="status">
       {report?.scope === scope ? report.text : ""}
     </p>
@@ -343,7 +348,7 @@ export default function Dashboard() {
    * L'échec garde le pictogramme d'alerte de la ligne « Serveur » juste au-dessus : même carte,
    * même avertissement, même dessin.
    */
-  const StatutEnLigne = ({ scope }: { scope: Scope }) => {
+  const statutEnLigne = (scope: Scope) => {
     const r = report?.scope === scope ? report : null;
     return (
       <span className={"enLigne" + (r?.kind === "err" ? " alerte" : "")} role="status">
@@ -639,10 +644,10 @@ export default function Dashboard() {
                       : t("monitorAge", { age: fmtAge(ageSec, tp) })}
                   </span>
                 )}
-                {/* Le retour de « Rappeler la machine » : voir `StatutEnLigne`. La pastille dit ce
+                {/* Le retour de « Rappeler la machine » : voir `statutEnLigne`. La pastille dit ce
                     que la machine rapporte, ce texte dit ce que NOUS venons de tenter — les deux
                     répondent à « où en est la liaison », donc ils tiennent sur la même ligne. */}
-                <StatutEnLigne scope="liaison" />
+                {statutEnLigne("liaison")}
               </dd>
             </div>
             {/* **La progression, en valeurs BRUTES — c'est la page du protocole.** L'accueil en
@@ -761,7 +766,7 @@ export default function Dashboard() {
             <span className="lbl">{t("readAll")}</span>
           </Button>
         </div>
-        <Statut scope="power" />
+        {statut("power")}
       </Card>
       </section>
 
@@ -808,7 +813,7 @@ export default function Dashboard() {
                         ressemblait à un deuxième libellé. */}
                     <dt className="k">{nomTache(encours)}</dt>
                     <dd className="titreLigne">
-                      <Rang n={encours.rang} />
+                      {rang(encours.rang)}
                       <Badge variant="marche">{t("taskProgress", { faits: encours.faits, total: encours.total })}</Badge>
                       {/* Le pas courant est un nom de propriété Ayla ou un libellé de trame :
                           chasse fixe, comme partout où cette page montre du protocole. */}
@@ -831,7 +836,7 @@ export default function Dashboard() {
                     <div className="kv" key={tache.id}>
                       <dt className="k">{nomTache(tache)}</dt>
                       <dd className="titreLigne etire">
-                        <Rang n={tache.rang} />
+                        {rang(tache.rang)}
                         <span className="sub">{t("taskSteps", { count: tache.total })}</span>
                         {/* **Icône seule, et le nom accessible reste.** Une ligne de file, c'est un
                             libellé de tâche, un rang, un nombre de pas — le mot « Annuler » répété à
@@ -909,7 +914,7 @@ export default function Dashboard() {
             )}
           </>
         )}
-        <Statut scope="activite" />
+        {statut("activite")}
       </Card>
       </section>
 
@@ -1095,7 +1100,7 @@ export default function Dashboard() {
         <h2 id="titre-journal-apps">{tapps("journalHeading")}</h2>
         <Card className="log">
           <Journal lignes={journal.lignes} source="apps" vider={() => viderJournal("apps")} />
-          <Statut scope="journalApps" />
+          {statut("journalApps")}
         </Card>
         </section>
       )}
@@ -1112,7 +1117,7 @@ export default function Dashboard() {
           multiMachine={(status?.machines?.length ?? 0) > 1}
           vider={() => viderJournal("machine")}
         />
-        <Statut scope="journalMachine" />
+        {statut("journalMachine")}
       </Card>
       </section>
       </div>

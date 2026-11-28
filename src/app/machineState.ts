@@ -77,7 +77,7 @@ export function taskLabel(
 ): string {
   const i = tache.i18n;
   if (!i?.k || !t.has(i.k)) return tache.label ?? "";
-  const params: Record<string, string | number> = { ...(i.p ?? {}) };
+  const params: Record<string, string | number> = { ...i.p };
   for (const [nom, r] of Object.entries(i.refs ?? {})) params[nom] = deref ? deref(r.ns, r.cle) : r.cle;
   try {
     return t(i.k, params);

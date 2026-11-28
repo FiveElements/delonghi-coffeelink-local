@@ -379,8 +379,8 @@ export default function Profils() {
               <div className="cardHead">
                 <div>
                   {/* Le nom, sa pastille et son numéro d'icône forment UNE ligne de titre. Ils
-                      étaient trois frères dans un conteneur sans gouttière : « Profil 1 — Jérôme » et
-                      « icône 12 » se touchaient, sans un pixel entre eux. */}
+                      étaient trois frères dans un conteneur sans gouttière : « Profil 1 — Jérôme » et
+                      « icône 12 » se touchaient, sans un pixel entre eux. */}
                   <div className="titreLigne">
                     {/* Un profil est un objet nommé, activable, et il y en a cinq : c'est un titre,
                         pas une mise en gras. L'accueil donne un `<h3>` à ses cartes de boisson. */}
@@ -393,7 +393,7 @@ export default function Profils() {
                         {t("nameNotRead")}
                       </Badge>
                     )}
-                    {/* « icône 12 » est une phrase avec un nombre, pas un identifiant : le monospace
+                    {/* « icône 12 » est une phrase avec un nombre, pas un identifiant : le monospace
                         n'y avait rien à faire. */}
                     {p.icon != null && (
                       <span className="sub num">

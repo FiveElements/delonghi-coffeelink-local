@@ -633,7 +633,7 @@ const frameSelectBean = (id) => seal([0x0d, 0x06, 0xb9, 0xf0, id & 0xff, 0, 0]);
 // (`d{39+i+(p-1)*21}_{p}_rec_*`), pas par cette trame. Elle documente le format de la requête
 // 0xA6 côté ECAM, qui est la seule autre façon de l'obtenir — la supprimer ferait perdre la
 // correspondance avec `doc/commandes-cafe.md` §6.
-// eslint-disable-next-line no-unused-vars
+// oxlint-disable-next-line no-unused-vars
 const frameRecipeQty = (prof, bev) => seal([0x0d, 0x07, 0xa6, 0xf0, prof & 0xff, bev & 0xff, 0, 0]);
 // J() « checksums » : sommes de contrôle des quantités par profil + perso + noms. Une seule
 // petite trame permet de savoir si le cache est encore valable, au lieu de tout relire.
@@ -1188,7 +1188,7 @@ async function executeDispense(m, { beverageId, profileId, recipeId, params } = 
   const frame = frameDispense(bev, prof, MODE.START, act, resolvedParams);
   const label = `Préparer ${bevLabel(m, bev)}${act === ACT.PREPARE_INVERSION ? " (lait d'abord)" : ""}`;
   const r = bevRef(m, bev);
-  const cleLibelle = { k: "dispense", p: { inversion: act === ACT.PREPARE_INVERSION ? 1 : 0, ...(r.p ?? {}) }, refs: r.refs };
+  const cleLibelle = { k: "dispense", p: { inversion: act === ACT.PREPARE_INVERSION ? 1 : 0, ...r.p }, refs: r.refs };
   const ecamB64 = datapointValue(frame);
   const t = startProgram(m, ecamB64, label, 75000, "monitor", { rang: RANG.COMMANDE, cle: cleFusion(ecamB64), i18n: cleLibelle, meta: { dispense: true } });
   const reg = await postLocalReg(m);
@@ -3067,7 +3067,7 @@ function applyChecksumMark(m, t) {
     L("sys", "sommes", `non mémorisées : ${t.nonLus.length} propriété(s) sans réponse — la relecture restera proposée`, m);
     return;
   }
-  m.store.setMeta("checksumsAtImport", { ...(m.store.getMeta("checksumsAtImport") ?? {}), ...mark });
+  m.store.setMeta("checksumsAtImport", { ...m.store.getMeta("checksumsAtImport"), ...mark });
   L("sys", "sommes", `mémorisée (0x${Number(mark.names).toString(16)}) : inutile de les relire tant qu'elle ne bouge pas`, m);
 }
 
@@ -4474,7 +4474,7 @@ function sseBroadcast() {
   const lignes = journalDepuis(sseJournalCurseur);
   const journal = lignes.length ? cadreJournal(lignes, false) : null;
   if (lignes.length) sseJournalCurseur = lignes[lignes.length - 1].n;
-  for (const res of [...SSE]) {
+  for (const res of SSE) {
     sseEcrire(res, `data: ${charge}\n\n`);
     if (journal) sseEcrire(res, journal);
   }
@@ -4529,7 +4529,7 @@ function viderJournal(source) {
   else L("sys", "Journal", resume);
   journalEvince = journalSeq;
   const cadre = cadreJournal(journalComplet(), true);
-  for (const res of [...SSE]) sseEcrire(res, cadre);
+  for (const res of SSE) sseEcrire(res, cadre);
   // La fenêtre entière vient de partir : le prochain lot d'ajouts repart d'ici, sans quoi il
   // relivrerait ce qu'on vient de livrer.
   sseJournalCurseur = journalSeq;
@@ -5977,7 +5977,7 @@ async function handleApi(req, res) {
         label = `Enregistrer ${bevLabel(m, bev)} dans le profil ${prof}`;
         // ⚠️ Fusionner `p`, ne PAS étaler `bevRef` par-dessus : voir le commentaire de `bevRef`.
         const rSave = bevRef(m, bev);
-        cleLibelle = { k: "saveToProfile", p: { profil: prof, ...(rSave.p ?? {}) }, refs: rSave.refs };
+        cleLibelle = { k: "saveToProfile", p: { profil: prof, ...rSave.p }, refs: rSave.refs };
         dur = 20000;
         // On renvoie la somme de contrôle du profil AVANT écriture : la redemander ensuite
         // (POST /api/checksums) permet de vérifier que la machine a bien enregistré, au lieu de

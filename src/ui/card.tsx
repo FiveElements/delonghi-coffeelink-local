@@ -84,7 +84,7 @@ const cardVariants = cva(
           /* ⚠️ Sur UNE seule chaîne, coupée par personne : Tailwind lit le TEXTE SOURCE. Une
              classe répartie sur deux littéraux réunis par `+` n'est un candidat complet dans
              aucun des deux, l'utilitaire n'est jamais généré, et la carte perd ses arêtes sans
-             qu'aucun outil ne dise rien — tsc compile, ESLint passe, la page s'affiche. */
+             qu'aucun outil ne dise rien — tsc compile, oxlint passe, la page s'affiche. */
           "shadow-[0_0_0_var(--trait)_var(--rule),inset_0_var(--trait)_0_0_var(--color-fraisage-ombre),inset_var(--trait)_0_0_0_var(--color-fraisage-ombre),inset_0_calc(-1*var(--trait))_0_0_var(--color-fraisage-jour),inset_calc(-1*var(--trait))_0_0_0_var(--color-fraisage-jour)]",
         machine:
           "bg-[var(--raise)] rounded-plaque p-[var(--s-4)] court:p-[var(--s-3)] mb-[var(--s-3)] " +

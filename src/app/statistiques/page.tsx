@@ -458,8 +458,11 @@ export default function Statistiques() {
    * `role="status"` créé en même temps que son contenu n'est pas annoncé, seul un changement DANS
    * une région déjà présente l'est. `.enLigne:empty` le retire de la mise en page sans le démonter.
    * L'échec prend le pictogramme d'alerte, comme le bandeau en tête de cette page.
+   *
+   * Appelé comme une fonction, pas monté comme `<StatutCopie />` : même piège qu'à `/pilotage`
+   * (voir `statut`), un composant déclaré dans le rendu remonte sa région à chaque passage.
    */
-  const StatutCopie = ({ cle }: { cle: CleCopie }) => {
+  const statutCopie = (cle: CleCopie) => {
     const r = copie?.cle === cle ? copie : null;
     return (
       <span className={"enLigne" + (r && !r.ok ? " alerte" : "")} role="status">
@@ -557,7 +560,7 @@ export default function Statistiques() {
                 {boutonCopier("known", t("copyKnown"), lignesConnus, d.known.length)}
               </div>
             </div>
-            <StatutCopie cle="known" />
+            {statutCopie("known")}
             {d.known.length === 0 ? (
               <p className="sub">{t("noKnownYet")}</p>
             ) : (
@@ -601,7 +604,7 @@ export default function Statistiques() {
                 {boutonCopier("unknown", t("copyUnknown"), lignesInconnus, unknownIds.length)}
               </div>
             </div>
-            <StatutCopie cle="unknown" />
+            {statutCopie("unknown")}
             {unknownIds.length === 0 ? (
               <p className="sub">{t("unknownEmpty")}</p>
             ) : (
@@ -638,7 +641,7 @@ export default function Statistiques() {
               {boutonCopier("named", t("copyNamed"), lignesNommes, nommesLus.length)}
             </div>
           </div>
-          <StatutCopie cle="named" />
+          {statutCopie("named")}
           {/* Le même couple que la barre du haut, et pour la même raison : deux étendues d'une
               seule et même demande. Le second en `coquille` + glyphe 14 px, comme « Tout balayer ». */}
           <div className="row barreActions">
@@ -736,7 +739,7 @@ export default function Statistiques() {
                 {boutonCopier("sync", t("copySync"), lignesSync, d.sync.words.length)}
               </div>
             </div>
-            <StatutCopie cle="sync" />
+            {statutCopie("sync")}
             {/* Les deux heures côte à côte : c'est la seule chose qui dise si un relevé différentiel
                 porte sur un état de la machine ou sur deux. Aucun seuil n'est inventé ici — on
                 montre les deux valeurs et on laisse lire. */}
