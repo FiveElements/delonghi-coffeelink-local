@@ -1,5 +1,5 @@
 "use client";
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback, useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/ui/dialog";
 import { Button } from "@/ui/button";
@@ -115,6 +115,9 @@ export function ConfirmDialog({ ask, onClose }: { ask: Ask | null; onClose: () =
    * contenu la garantit même si deux questions se succèdent sans fermeture intermédiaire.
    */
   const [neRedemandePas, setNeRedemandePas] = useState(false);
+  /* La case est un `<button>` Radix : le `<label>` qui l'enveloppe ne la nomme pas (voir AGENTS.md,
+     § Styling). Ses deux textes sont visés par `aria-labelledby` / `aria-describedby`. */
+  const idCase = useId();
 
   return (
     <Dialog
@@ -195,10 +198,12 @@ export function ConfirmDialog({ ask, onClose }: { ask: Ask | null; onClose: () =
                   className="mt-0.5 size-[18px] shrink-0"
                   checked={neRedemandePas}
                   onCheckedChange={(v) => setNeRedemandePas(v === true)}
+                  aria-labelledby={`${idCase}-nom`}
+                  aria-describedby={`${idCase}-ou`}
                 />
                 <span className="grid min-w-0 gap-px">
-                  {tc("dontAskAgain")}
-                  <span className="text-petit text-encre-faible">{tc("dontAskAgainWhere")}</span>
+                  <span id={`${idCase}-nom`}>{tc("dontAskAgain")}</span>
+                  <span id={`${idCase}-ou`} className="text-petit text-encre-faible">{tc("dontAskAgainWhere")}</span>
                 </span>
               </label>
             )}

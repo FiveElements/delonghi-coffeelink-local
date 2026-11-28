@@ -5,6 +5,7 @@ import { mfetch, murl } from "../machine";
 import Icone from "../icons";
 import { useMachinePush } from "../events";
 import { useConfirm } from "../confirm";
+import { compteRendu, echecReseau, raisonEchec } from "../register";
 import ReglagesGrains, { type Bound, type Brouillon } from "../ReglagesGrains";
 import CarteGrain from "../CarteGrain";
 import AffinageDialog from "../AffinageDialog";
@@ -143,8 +144,11 @@ export default function Beans() {
    */
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
   const dire = (text: string) => setMsg({ text, kind: "ok" });
-  const rendre = (r: any, ok: string) =>
-    setMsg(r.error ? { text: tc("error", { message: r.error }), kind: "err" } : { text: ok, kind: "ok" });
+  /* `compteRendu` lit aussi l'annonce : une écriture 0xBB acceptée mais jamais annoncée à la
+     machine n'est pas « envoyée ». `rate` est le `catch` commun — une panne de liaison doit
+     s'afficher, pas rejeter une promesse que personne n'écoute. */
+  const rendre = (r: unknown, ok: string) => setMsg(compteRendu(r, ok, tc));
+  const rate = (e: unknown) => setMsg(echecReseau(e, tc));
   const { demander, dialogue } = useConfirm();
   /**
    * L'emplacement machine dont le dos est ouvert, et son brouillon.
@@ -204,14 +208,18 @@ export default function Beans() {
     setBusy(true);
     setMsg(null);
     try {
-      await mfetch("/api/beansystem", {
+      // La réponse est LUE : un refus 409 (adresse ou clé LAN manquante) ou une annonce ratée
+      // s'affichaient « lecture demandée » faute de regarder ce que le serveur répondait.
+      const r = await mfetch("/api/beansystem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ index }),
-      });
+      }).then((x) => x.json());
       // Pas de minuteur : la valeur arrivera quand la machine l'aura poussée, et le flux nous le
       // dira. C'est exactement ce que le `setTimeout(refresh, 6000)` d'avant essayait de devimer.
-      dire(t("readQueued", { index }));
+      rendre(r, t("readQueued", { index }));
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -228,6 +236,8 @@ export default function Beans() {
         body: JSON.stringify({ from: 0, to: 5 }),
       }).then((x) => x.json());
       rendre(r, t("scanStarted", { from: r.from, to: r.to }));
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -275,7 +285,7 @@ export default function Beans() {
          * ne fait rien, sans un mot : le pire des retours pour un bouton d'enregistrement. Les
          * deux autres hôtes, eux, sont à même hauteur que le `.status` et n'ont rien à changer.
          */
-        return String(r.error);
+        return tc("error", { message: String(r.error) });
       }
       dire(t("presetSaved", { name: r.preset.name || t("unnamed") }));
       /* Le dialogue de création se ferme ICI et pas au clic : tant que le serveur n'a pas pris la
@@ -284,6 +294,9 @@ export default function Beans() {
       setEdition(null);
       await refresh();
       return null;
+    } catch (e) {
+      rate(e);
+      return raisonEchec(e, tc);
     } finally {
       setBusy(false);
     }
@@ -344,6 +357,8 @@ export default function Beans() {
         );
         await refresh();
       }
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -393,6 +408,8 @@ export default function Beans() {
         setMsg({ text: tc("error", { message: releve?.erreur ?? t("cloudImportUnknown") }), kind: "err" });
       }
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -404,10 +421,15 @@ export default function Beans() {
   const oublieConfirme = async (p: Preset) => {
     setBusy(true);
     try {
-      await mfetch(`/api/beanpresets?id=${encodeURIComponent(p.id)}`, { method: "DELETE" });
-      dire(t("presetForgotten", { name: p.name || t("unnamed") }));
+      const r = await mfetch(`/api/beanpresets?id=${encodeURIComponent(p.id)}`, { method: "DELETE" }).then((x) => x.json());
+      // `removed: false` = la fiche n'existait déjà plus (oubliée depuis un autre onglet) : le
+      // dire plutôt qu'annoncer un oubli qui n'a rien fait.
+      const nom = p.name || t("unnamed");
+      rendre(r, r.removed ? t("presetForgotten", { name: nom }) : t("presetForgetMissing", { name: nom }));
       setEdition(null);
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -450,6 +472,8 @@ export default function Beans() {
         body: JSON.stringify({ index, name: p.name, grinder: p.grinder, temperature: p.temperature, aroma: p.aroma, visible: true }),
       }).then((x) => x.json());
       rendre(r, t("presetWritten", { name: p.name || t("unnamed"), index }));
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -530,8 +554,11 @@ export default function Beans() {
           visible,
         }),
       }).then((x) => x.json());
+      // Plus de `setTimeout(refresh, 8000)`, jamais annulé au démontage : l'écriture est un
+      // programme (`running`), et `useMachinePush` relit déjà quand il se termine.
       rendre(r, t("saveSent"));
-      setTimeout(refresh, 8000);
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -551,6 +578,8 @@ export default function Beans() {
         body: JSON.stringify({ action: "selectBean", beanId: index }),
       }).then((x) => x.json());
       rendre(r, t("activateSent"));
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }

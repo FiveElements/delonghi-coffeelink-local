@@ -517,8 +517,9 @@ label { display: block; font-size: var(--t-petit); color: var(--encre-douce); ma
    défilement horizontal que `.tableWrap` fabriquait à la main. Ne reste ici que le rythme du
    produit — corps réduit, interligne dense, filets de la finition — posé sur les emplacements du
    composant plutôt que sur les balises : un `<table>` nu n'existe plus dans les surfaces. */
-[data-slot="table"] { font-size: var(--t-petit); line-height: var(--lead-dense); }
-[data-slot="table-head"], [data-slot="table-cell"] { padding: 6px 8px; text-align: left; }
+/* Corps, interligne et remplissage des cellules sont sur le composant : ici ils perdaient contre
+   `text-sm` et `p-2`. Reste l'alignement, qu'aucun utilitaire du composant ne fixe sur `<td>`. */
+[data-slot="table-head"], [data-slot="table-cell"] { text-align: left; }
 [data-slot="table-row"] { border-bottom: 1px solid var(--rule); }
 /* **`.log` ne definit plus « une sortie de terminal ».** Elle habillait la carte entiere en chasse
    fixe et lui posait un plafond de 260 px : c'etait exactement le rendu que ce lot remplace. Il ne
@@ -1019,7 +1020,9 @@ ol.listeFavoris > li:last-child { border-bottom: 0; }
    pas laisser une pastille large autour d'un glyphe de 17 ; la hauteur, elle, ne bouge pas
    (`min-height: var(--h-ctl)` s'applique toujours), donc la cible tactile reste entière. Le nom
    accessible est porté par `aria-label` côté composant — sans lui le bouton n'aurait plus de nom
-   du tout. */
+   du tout.
+   ⚠️ Cette règle ne sert plus qu'au `<a>` nu de `/profils` : sur un `<Button>`, elle perdait contre
+   le `px-3` de la taille `commande` (couche `utilities`). Les boutons portent donc `px-2.5`. */
 .iconBtn.iconSeul { padding-left: 10px; padding-right: 10px; }
 /* **Aligné au bord droit, sinon la colonne de boutons est en dents de scie.** Dans une ligne de
    file, ce qui précède le bouton n'a pas de largeur fixe : la pastille de rang fait « lecture » ou
@@ -1589,19 +1592,10 @@ ol.listeFavoris > li:last-child { border-bottom: 0; }
      deux mécanismes sont volontairement nommés l'un dans l'autre : c'est par ce bloc-ci qu'on
      cherchera, et c'est là-bas que ça vit. */
 
-  /* La poignée grossit, la piste aussi : viser 6 px de haut au doigt ne marche pas. */
-  /* Le curseur et l'interrupteur sont des composants : la cible se règle sur leurs emplacements,
-     pas sur les pseudo-éléments du natif — qui n'existent plus. */
-  [data-slot="slider"] { height: 44px; }
-  [data-slot="slider-track"] { height: 8px; }
-  [data-slot="slider-thumb"] { width: 30px; height: 30px; }
-  /* L'interrupteur d'un RÉGLAGE grossit au doigt. Celui de l'alimentation, lui, porte déjà sa
-     taille de commande principale (76 × 42) et n'a rien à gagner. */
-  [data-slot="switch"][data-size="sm"] { width: 64px; height: 36px; }
-  [data-slot="switch"][data-size="sm"] > [data-slot="switch-thumb"] { width: 28px; height: 28px; }
-  [data-slot="switch"][data-size="sm"][data-state="checked"] > [data-slot="switch-thumb"] {
-    transform: translateX(28px);
-  }
+  /* Le curseur et l'interrupteur grossissent au doigt par `tactile:` sur leurs composants
+     (`src/ui/slider.tsx`, `src/ui/switch.tsx`). Leurs tailles vivaient ici et perdaient contre les
+     utilitaires ; le `transform` de l'interrupteur s'additionnait même au `translate` de
+     Tailwind 4, et sortait la poignée cochée de sa piste. */
   /* Deux commandes voisines à 10 px l'une de l'autre se touchent par erreur au pouce. */
   .row { gap: var(--s-3); }
 }

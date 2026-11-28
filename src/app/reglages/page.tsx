@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { mfetch } from "../machine";
 import { useMachinePush } from "../events";
 import { useConfirm } from "../confirm";
+import { compteRendu, echecReseau } from "../register";
 import Icone from "../icons";
 import { styleCrans } from "../crans";
 import { Input } from "@/ui/input";
@@ -66,8 +67,9 @@ export default function Reglages() {
   /** Les valeurs arrivent quand la machine répond : on est prévenu, on ne scrute pas. */
   const { live, busy: pending } = useMachinePush(refresh);
 
-  const rendre = (r: { error?: string }, ok: string) =>
-    setMsg(r.error ? { text: tc("error", { message: r.error }), kind: "err" } : { text: ok, kind: "ok" });
+  // `compteRendu` lit aussi l'annonce (voir `register.ts`) ; `rate` est le `catch` commun.
+  const rendre = (r: unknown, ok: string) => setMsg(compteRendu(r, ok, tc));
+  const rate = (e: unknown) => setMsg(echecReseau(e, tc));
 
   const lire = async () => {
     setBusy(true);
@@ -76,6 +78,8 @@ export default function Reglages() {
       const r = await mfetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then((x) => x.json());
       rendre(r, t("readQueued", { count: r.count ?? 0 }));
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -92,6 +96,8 @@ export default function Reglages() {
       }).then((x) => x.json());
       rendre(r, ok);
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }

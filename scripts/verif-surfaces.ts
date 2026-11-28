@@ -276,7 +276,7 @@ async function semer(dir: string) {
    * Cinq entrées choisies pour couvrir les cinq états que la carte doit savoir distinguer, parce
    * que chacun se rend différemment et qu'aucun ne se déduit des autres :
    *
-   *   - `d553` : le SEUL converti. 387 213 demi-millilitres → 194 L. C'est la valeur qui prouve
+   *   - `d553` : le SEUL converti. 387 213 demi-millilitres → 193,6 L (au dixième). C'est la valeur qui prouve
    *     qu'on divise par 2000 et non par 1000 : à /1000 la page afficherait 387, plausible et faux
    *     — exactement ce que publie l'intégration Home Assistant dont la table vient ;
    *   - `d733` : un compteur en OBJET JSON (Striker), dont la ventilation doit descendre à l'écran ;
@@ -309,7 +309,10 @@ const CLE_LAN = "verifsurfaces000";
 
 function demarrer(dir: string) {
   const enfant = spawn(process.execPath, ["server.ts"], {
-    env: { ...process.env, DATA_DIR: dir, SERVER_PORT: String(PORT), LANIP_KEY: CLE_LAN },
+    // `ENV_FILE` inexistant : sans lui, server.ts complète les variables absentes depuis le
+    // `.env.local` du développeur (cwd = le dépôt), et un `DATABASE_FILE` posé là l'emporterait sur
+    // le `DATA_DIR` jetable — le banc écrirait dans la vraie base.
+    env: { ...process.env, DATA_DIR: dir, ENV_FILE: join(dir, "absent.env"), SERVER_PORT: String(PORT), LANIP_KEY: CLE_LAN },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let journal = "";
@@ -2106,9 +2109,9 @@ try {
     await page.goto(BASE + "/statistiques", { waitUntil: "networkidle2", timeout: 30000 });
     await page.waitForSelector(`${N} .kv`, { timeout: 10000 });
     const ligne = await ligneCompteur(page, "d553_water_tot_qty");
-    vrai(/194 L/.test(ligne), `les litres attendus manquent : « ${ligne} »`);
+    vrai(/193,6 L/.test(ligne), `les litres attendus (au dixième) manquent : « ${ligne} »`);
     // Le défaut visé nommément : la valeur que donnerait le diviseur 1000 de l'intégration HA.
-    vrai(!/\b387 L\b/.test(ligne), `la conversion /1000 de Home Assistant a été reprise : « ${ligne} »`);
+    vrai(!/\b387(,\d)? L\b/.test(ligne), `la conversion /1000 de Home Assistant a été reprise : « ${ligne} »`);
     vrai(/387 213/.test(ligne), `la valeur brute doit rester lisible : « ${ligne} »`);
     await page.close();
   });

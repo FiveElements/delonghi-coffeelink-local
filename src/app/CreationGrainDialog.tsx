@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { mfetch } from "./machine";
+import { raisonEchec } from "./register";
 import Icone from "./icons";
 import { ImageTorrefaction } from "./VignetteGrains";
 import ChoixVisuel from "./ChoixVisuel";
@@ -96,8 +97,8 @@ export default function CreationGrainDialog({
   /** L'enregistrement est en cours côté page : le parcours entier se verrouille. */
   busy?: boolean;
   /**
-   * Enregistre la configuration, et **rend le message d'erreur du serveur** — `null` si tout va
-   * bien. C'est la page qui ferme le dialogue, une fois le serveur d'accord ; et c'est ce dialogue
+   * Enregistre la configuration, et **rend le message d'erreur, déjà mis en phrase** (refus du
+   * serveur ou panne de liaison) — `null` si tout va bien. C'est la page qui ferme le dialogue, une fois le serveur d'accord ; et c'est ce dialogue
    * qui montre le refus, parce que le `.status` de la page est derrière lui.
    */
   onCreer: (b: Brouillon) => Promise<string | null>;
@@ -166,6 +167,10 @@ export default function CreationGrainDialog({
            configuration neuve n'a pas de photo enregistrée à retirer. */
       });
       return true;
+    } catch (e) {
+      // Sans ce `catch`, une panne de liaison laissait le dialogue sur place sans un mot.
+      setErreur(raisonEchec(e, tc));
+      return false;
     } finally {
       setCalcul(false);
     }
@@ -179,7 +184,7 @@ export default function CreationGrainDialog({
     if (!brouillon) return;
     setErreur(null);
     const err = await onCreer(brouillon);
-    if (err) setErreur(tc("error", { message: err }));
+    if (err) setErreur(err);
   };
 
   const suivant = async () => {

@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useBeverageLabel, useParamLabel, useUnitLabel } from "@/i18n/labels";
 import { mfetch } from "../machine";
 import { useConfirm } from "../confirm";
+import { echecAction, raisonEchec } from "../register";
 import Icone from "../icons";
 import Alerte from "../Alerte";
 import BeverageCard, { type Report } from "../BeverageCard";
@@ -106,6 +107,32 @@ const nouvelId = () =>
  * jamais — sans dépendre d'un état supplémentaire pour distinguer « je crée » de « je modifie ».
  */
 const NOUVELLE = "@nouvelle";
+
+/**
+ * **Un défaut qui dit « jamais configuré », et qui tient dans son octet.**
+ *
+ * La convention est celle de la machine : un défaut hors de ses propres bornes signifie que le
+ * modèle n'a rien décidé (le mug de voyage donne 0 sous un minimum de 40). C'est ce qui fait
+ * répondre `composable()` par elle-même, sans drapeau d'affichage — voir `declarationLibre`.
+ *
+ * ⚠️ `min - 1` seul ne suffit pas, et la trame calculée l'a démontré au premier rendu : un
+ * paramètre de minimum 0 (`BLEND`, `INVERSION`, `ACCESSORIO`, `VISIBLE`…) donnait **-1**, qu'aucun
+ * octet ne porte — l'encodeur lève plutôt que de tronquer, et il a eu raison. On sort donc par le
+ * bas quand c'est possible, par le haut sinon. Un paramètre qui occuperait toute la largeur
+ * n'aurait aucune valeur hors bornes à offrir : on garde alors le défaut tel quel, ce qui est le
+ * seul énoncé vrai disponible.
+ *
+ * Hors du composant parce qu'elle est pure : c'est ce qui laisse `declarationLibre` mémoïsée sur
+ * `bornesLarges` seul, sans désactiver `exhaustive-deps`.
+ */
+function defautAbsent(p: Param): number {
+  const min = p.min as number;
+  const max = p.max as number;
+  const large = TWO.has(p.id) ? 0xffff : 0xff;
+  if (min > 0) return min - 1;
+  if (max < large) return max + 1;
+  return p.def ?? min;
+}
 
 export default function Recipes() {
   const t = useTranslations("recipes");
@@ -223,29 +250,6 @@ export default function Recipes() {
   }, [beverages]);
 
   /**
-   * **Un défaut qui dit « jamais configuré », et qui tient dans son octet.**
-   *
-   * La convention est celle de la machine : un défaut hors de ses propres bornes signifie que le
-   * modèle n'a rien décidé (le mug de voyage donne 0 sous un minimum de 40). C'est ce qui fait
-   * répondre `composable()` par elle-même, sans drapeau d'affichage — voir `declarationLibre`.
-   *
-   * ⚠️ `min - 1` seul ne suffit pas, et la trame calculée l'a démontré au premier rendu : un
-   * paramètre de minimum 0 (`BLEND`, `INVERSION`, `ACCESSORIO`, `VISIBLE`…) donnait **-1**, qu'aucun
-   * octet ne porte — l'encodeur lève plutôt que de tronquer, et il a eu raison. On sort donc par le
-   * bas quand c'est possible, par le haut sinon. Un paramètre qui occuperait toute la largeur
-   * n'aurait aucune valeur hors bornes à offrir : on garde alors le défaut tel quel, ce qui est le
-   * seul énoncé vrai disponible.
-   */
-  const defautAbsent = (p: Param): number => {
-    const min = p.min as number;
-    const max = p.max as number;
-    const large = TWO.has(p.id) ? 0xffff : 0xff;
-    if (min > 0) return min - 1;
-    if (max < large) return max + 1;
-    return p.def ?? min;
-  };
-
-  /**
    * **La même déclaration pour une recette qu'on crée et pour une recette qu'on rouvre.**
    *
    * Montée sur la boisson stockée telle quelle, une carte de recette rendait ses curseurs avec les
@@ -254,7 +258,7 @@ export default function Recipes() {
    * remplace les bornes et **rien d'autre** : l'identité de la boisson est conservée, ce qui garde
    * juste ce que « Infos techniques » nomme et ce que la trame portera.
    */
-  const declarationLibre = (b: Beverage): Beverage => {
+  const declarationLibre = useCallback((b: Beverage): Beverage => {
     // Les ingrédients et leurs options, dans l'ordre de la table — et rien d'autre : `PROGRAMABLE`
     // et `VISIBLE` décrivent un emplacement de la machine, pas une recette gardée en base.
     const ids = INGREDIENTS.flatMap((g) => [g.quantite, ...g.options]).filter((id) => bornesLarges.has(id));
@@ -299,12 +303,11 @@ export default function Recipes() {
       boundsProp: null,
       valuesProp: null,
     };
-  };
+  }, [bornesLarges]);
 
   const bevLibre = useMemo(
     () => (supportLibre ? declarationLibre(supportLibre) : null),
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [supportLibre, bornesLarges],
+    [supportLibre, declarationLibre],
   );
 
   /**
@@ -384,6 +387,8 @@ export default function Recipes() {
        * l'appareil accepte se fait au moment du transfert, pas ici.
        */
       setReport(null);
+    } catch (e) {
+      dire(draft.id, raisonEchec(e, tc), "err");
     } finally {
       setBusy(false);
     }
@@ -393,13 +398,20 @@ export default function Recipes() {
     demander({
       question: t("deleteConfirm", { name: e.recipe.name }),
       onConfirm: async () => {
-        const r = await mfetch("/api/recipes?id=" + encodeURIComponent(e.recipe.id), { method: "DELETE" }).then((x) => x.json());
-        if (!r.error) {
+        // Un refus ou une panne s'affichent sur la carte : la suppression échouait en silence.
+        try {
+          const r = await mfetch("/api/recipes?id=" + encodeURIComponent(e.recipe.id), { method: "DELETE" }).then((x) => x.json());
+          if (r.error) {
+            dire(e.recipe.id, tc("error", { message: r.error }), "err");
+            return;
+          }
           setData(r);
           if (open === e.recipe.id) {
             setOpen(null);
             setDraft(null);
           }
+        } catch (err) {
+          dire(e.recipe.id, raisonEchec(err, tc), "err");
         }
       },
     });
@@ -432,8 +444,11 @@ export default function Recipes() {
             body: JSON.stringify(corps),
           }).then((x) => x.json());
           // Aucun message de succès : la barre de progression de la machine raconte la suite mieux
-          // qu'une phrase. Les refus, eux, s'affichent toujours.
-          if (r.error) dire(e.recipe.id, tc("error", { message: r.error }), "err");
+          // qu'une phrase. Les refus — annonce ratée comprise (`echecAction`) — s'affichent toujours.
+          const echec = echecAction(r, tc);
+          if (echec) dire(e.recipe.id, echec, "err");
+        } catch (err) {
+          dire(e.recipe.id, raisonEchec(err, tc), "err");
         } finally {
           setBusy(false);
         }
@@ -456,8 +471,11 @@ export default function Recipes() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "saveToProfile", beverageId: e.beverage.id, profileId: e.recipe.profileId, params }),
       }).then((x) => x.json());
-      if (r.error) dire(e.recipe.id, tc("error", { message: r.error }), "err");
+      const echec = echecAction(r, tc);
+      if (echec) dire(e.recipe.id, echec, "err");
       else dire(e.recipe.id, t("writeSent", { checksum: r.checksumBefore != null ? "0x" + r.checksumBefore.toString(16) : tc("unknown") }));
+    } catch (err) {
+      dire(e.recipe.id, raisonEchec(err, tc), "err");
     } finally {
       setBusy(false);
     }
@@ -488,9 +506,12 @@ export default function Recipes() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "transferToSlot", recipeId: e.recipe.id, slot, profileId: e.recipe.profileId }),
           }).then((x) => x.json());
+          const echec = echecAction(r, tc);
           if (r.needsIcon) dire(e.recipe.id, t("transferNeedsIcon"), "err");
-          else if (r.error) dire(e.recipe.id, tc("error", { message: r.error }), "err");
+          else if (echec) dire(e.recipe.id, echec, "err");
           else dire(e.recipe.id, t("transferSent", { slot, count: r.plan?.params?.length ?? 0 }));
+        } catch (err) {
+          dire(e.recipe.id, raisonEchec(err, tc), "err");
         } finally {
           setBusy(false);
         }
@@ -568,7 +589,9 @@ export default function Recipes() {
               value={draft.name}
               onChange={(ev) => setDraft({ ...draft, name: ev.target.value })}
               placeholder={t("namePlaceholder")}
-              maxLength={20}
+              /* 10 et non 20 : un transfert écrit ce nom par `0xAB`, 20 octets UTF-16BE = 10
+                 caractères, et le serveur refuse au-delà. */
+              maxLength={10}
             />
           </div>
         </div>

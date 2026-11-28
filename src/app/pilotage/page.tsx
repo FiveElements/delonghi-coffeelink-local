@@ -7,7 +7,7 @@ import { useJournal } from "../journalFlux";
 import Journal from "../Journal";
 import { useConfirm } from "../confirm";
 import ConfirmSettings from "../ConfirmSettings";
-import { cleAnnonce, echecAnnonce } from "../register";
+import { echecAction, raisonEchec } from "../register";
 import { AGE_PERIME, AGE_PROGRESSION, fmtAge, sensorLabel, splitSensors, stateLabel, stateTone, stepLabel, taskLabel } from "../machineState";
 import Alerte from "../Alerte";
 import Icone from "../icons";
@@ -135,13 +135,16 @@ export default function Dashboard() {
   const { live } = useMachineEvents(refresh, journal.recevoir);
 
   // Repli, et seulement là : si le flux ne s'établit pas, on revient au minuteur, et on le dit.
+  // `rattraper` et non `journal` : l'objet rendu par `useJournal` est neuf à chaque rendu, donc le
+  // minuteur était détruit et recréé à chaque ligne reçue. `rattraper` est un `useCallback` stable.
+  const { rattraper } = journal;
   useEffect(() => {
     if (live) return;
     // Le journal repasse par le meme minuteur, et par le meme code de fusion : `rattraper()` ne
     // redemande que ce qui a paru depuis le curseur, jamais la fenetre entiere.
-    const t = setInterval(() => { refresh(); journal.rattraper(); }, 3000);
+    const t = setInterval(() => { refresh(); rattraper(); }, 3000);
     return () => clearInterval(t);
-  }, [live, refresh, journal]);
+  }, [live, refresh, rattraper]);
 
   const send = async (scope: Scope, bodyObj: any, ok?: (r: any) => string) => {
     setBusy(true);
@@ -155,17 +158,15 @@ export default function Dashboard() {
       // Même règle que l'accueil, et pour la même raison : voir `register.ts`. Annoncer un envoi
       // que l'annonce a démenti est ce qui a fait passer une machine injoignable pour un bouton
       // cassé.
-      const annonce = echecAnnonce(r);
+      const echec = echecAction(r, tc);
       setReport(
-        r.error
-          ? { scope, text: tc("error", { message: r.error }), kind: "err" }
-          : annonce
-            ? { scope, text: tc(cleAnnonce(annonce)), kind: "err" }
-            : { scope, text: ok ? ok(r) : tp("powerSent", { label: r.program ?? "" }), kind: "ok" },
+        echec
+          ? { scope, text: echec, kind: "err" }
+          : { scope, text: ok ? ok(r) : tp("powerSent", { label: r.program ?? "" }), kind: "ok" },
       );
       await refresh();
     } catch (e) {
-      setReport({ scope, text: tc("error", { message: String(e) }), kind: "err" });
+      setReport({ scope, text: raisonEchec(e, tc), kind: "err" });
     } finally {
       setBusy(false);
     }
@@ -256,17 +257,11 @@ export default function Dashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ force: true }),
       }).then((x) => x.json());
-      const annonce = echecAnnonce(r);
-      setReport(
-        r.error
-          ? { scope: "power", text: tc("error", { message: r.error }), kind: "err" }
-          : annonce
-            ? { scope: "power", text: tc(cleAnnonce(annonce)), kind: "err" }
-            : { scope: "power", text: t("readStateSent"), kind: "ok" },
-      );
+      const echec = echecAction(r, tc);
+      setReport(echec ? { scope: "power", text: echec, kind: "err" } : { scope: "power", text: t("readStateSent"), kind: "ok" });
       await refresh();
     } catch (e) {
-      setReport({ scope: "power", text: tc("error", { message: String(e) }), kind: "err" });
+      setReport({ scope: "power", text: raisonEchec(e, tc), kind: "err" });
     } finally {
       setBusy(false);
     }
@@ -277,17 +272,15 @@ export default function Dashboard() {
     setReport(null);
     try {
       const r = await mfetch("/api/readall", { method: "POST" }).then((x) => x.json());
-      const annonce = echecAnnonce(r);
+      const echec = echecAction(r, tc);
       setReport(
-        r.error
-          ? { scope: "power", text: tc("error", { message: r.error }), kind: "err" }
-          : annonce
-            ? { scope: "power", text: tc(cleAnnonce(annonce)), kind: "err" }
-            : { scope: "power", text: t("readAllSent", { count: r.count, steps: r.steps }), kind: "ok" },
+        echec
+          ? { scope: "power", text: echec, kind: "err" }
+          : { scope: "power", text: t("readAllSent", { count: r.count, steps: r.steps }), kind: "ok" },
       );
       await refresh();
     } catch (e) {
-      setReport({ scope: "power", text: tc("error", { message: String(e) }), kind: "err" });
+      setReport({ scope: "power", text: raisonEchec(e, tc), kind: "err" });
     } finally {
       setBusy(false);
     }
@@ -305,7 +298,7 @@ export default function Dashboard() {
       );
       await refresh();
     } catch (e) {
-      setReport({ scope: "liaison", text: tc("error", { message: String(e) }), kind: "err" });
+      setReport({ scope: "liaison", text: raisonEchec(e, tc), kind: "err" });
     } finally {
       setBusy(false);
     }
@@ -481,10 +474,12 @@ export default function Dashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "clear", ...(taskId ? { taskId } : {}) }),
         }).then((x) => x.json());
-        setReport({ scope: "activite", text: t("taskCancelled", { count: r.cleared ?? 0 }), kind: "ok" });
+        // Un refus s'affiche : « 0 tâche annulée » sur une erreur aurait l'air d'un succès vide.
+        const echec = echecAction(r, tc);
+        setReport(echec ? { scope: "activite", text: echec, kind: "err" } : { scope: "activite", text: t("taskCancelled", { count: r.cleared ?? 0 }), kind: "ok" });
         await refresh();
       } catch (e) {
-        setReport({ scope: "activite", text: tc("error", { message: String(e) }), kind: "err" });
+        setReport({ scope: "activite", text: raisonEchec(e, tc), kind: "err" });
       } finally {
         setBusy(false);
       }
@@ -535,7 +530,7 @@ export default function Dashboard() {
           );
           journal.rattraper();
         } catch (e) {
-          setReport({ scope, text: tc("error", { message: String(e) }), kind: "err" });
+          setReport({ scope, text: raisonEchec(e, tc), kind: "err" });
         } finally {
           setBusy(false);
         }
@@ -847,7 +842,7 @@ export default function Dashboard() {
                             « Vider la file », en dessous, garde son libellé : il est unique sur la
                             carte et n'annule pas la même chose. */}
                         <Button type="button" variant="discret-arret" size="commande"
-                          className="iconBtn iconSeul aDroite"
+                          className="iconBtn iconSeul aDroite px-2.5"
                           disabled={busy}
                           onClick={() => annulerTaches(tache.id)}
                           aria-label={t("taskCancel")}

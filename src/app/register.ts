@@ -16,6 +16,7 @@
  * Le message technique (« socket hang up ») **reste au journal** : ce qui remonte ici est une cause,
  * pas une chaîne de protocole.
  */
+import type { Translator } from "./machineState";
 
 /** La cause d'un échec d'annonce, ou `null` si l'annonce est passée (ou n'a rien à dire). */
 export function echecAnnonce(r: unknown): string | null {
@@ -38,4 +39,61 @@ export function cleAnnonce(cause: string): string {
   if (cause === "machineIp") return "regNoAddress";
   if (cause === "serverIp") return "regServerIp";
   return "regUnreachable";
+}
+
+
+/**
+ * **Le verdict d'une réponse d'action, au même endroit pour toutes les pages.**
+ *
+ * `echecAnnonce` n'était lu que sur `/` et `/pilotage` : `/beans`, `/profils`, `/reglages`,
+ * `/recipes` et les dialogues de grain ne regardaient que `error` et annonçaient « envoyé » à une
+ * cafetière qui n'avait rien entendu — le défaut que ce fichier existe pour corriger, reproduit
+ * ailleurs. Une seule fonction, pour qu'une page de plus ne puisse pas l'oublier à son tour.
+ *
+ * Rend `null` quand la réponse ne dit aucun échec, sinon la phrase à afficher. Une réponse sans
+ * `register` (une écriture locale, un calcul) se réduit à son `error`.
+ */
+export function echecAction(r: unknown, tc: Translator): string | null {
+  const err = (r as { error?: unknown } | null)?.error;
+  if (err) return tc("error", { message: String(err) });
+  const annonce = echecAnnonce(r);
+  return annonce ? tc(cleAnnonce(annonce)) : null;
+}
+
+/** Le compte rendu `{ text, kind }` que les pages affichent dans leur `.status`. */
+export interface CompteRendu {
+  text: string;
+  kind: "ok" | "err";
+}
+
+/** `echecAction` mis en forme : l'échec s'il y en a un, sinon `ok`. */
+export function compteRendu(r: unknown, ok: string, tc: Translator): CompteRendu {
+  const echec = echecAction(r, tc);
+  return echec ? { text: echec, kind: "err" } : { text: ok, kind: "ok" };
+}
+
+/**
+ * Un `fetch` qui rejette n'a pas atteint le serveur ; un `fetch` qui répond 500 l'a atteint. La
+ * distinction décide de la phrase : dans le premier cas il n'y a rien à corriger côté machine, et
+ * rien d'autre à proposer que de réessayer.
+ */
+export function injoignable(e: unknown): boolean {
+  return e instanceof TypeError;
+}
+
+/**
+ * La raison d'une exception, en langue d'intention plutôt qu'en nom de classe JavaScript.
+ *
+ * Partagée parce qu'une vingtaine de gestionnaires faisaient `try { mfetch… } finally` sans
+ * `catch` : une panne de liaison y devenait une promesse rejetée que personne n'écoutait, la page
+ * restait muette — ou figée sur « Lecture en cours… » pour toujours.
+ */
+export function raisonEchec(e: unknown, tc: Translator): string {
+  if (injoignable(e)) return tc("serverUnreachable");
+  return tc("error", { message: e instanceof Error ? e.message : String(e) });
+}
+
+/** `raisonEchec` sous la forme d'un compte rendu d'échec, pour les `catch` des pages. */
+export function echecReseau(e: unknown, tc: Translator): CompteRendu {
+  return { text: raisonEchec(e, tc), kind: "err" };
 }

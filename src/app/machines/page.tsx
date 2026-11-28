@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { type MachineSummary, currentMachine, forId, setCurrentMachine } from "../machine";
 import { useMachineEvents } from "../events";
 import { useConfirm } from "../confirm";
+import { echecAction, echecReseau } from "../register";
 import Alerte from "../Alerte";
 import Icone from "../icons";
 import { Input } from "@/ui/input";
@@ -454,7 +455,9 @@ export default function Machines() {
   const readModel = (m: MachineSummary) =>
     run(m.id, async () => {
       const r = await fetch(forId("/api/model", m.id), { method: "POST" }).then((x) => x.json());
-      if (r.error) return refus(r.error);
+      // `echecAction` : une lecture jamais annoncée à la machine ne rendra rien — inutile de scruter 15 s.
+      const echec = echecAction(r, tc);
+      if (echec) return { text: echec, kind: "err" };
       for (let i = 0; i < 10; i++) {
         await new Promise((res) => setTimeout(res, 1500));
         const p: Payload = await fetch("/api/machines").then((x) => x.json());
@@ -479,6 +482,8 @@ export default function Machines() {
       await fetch("/api/cloudsession", { method: "DELETE" });
       dire(t("cloudSessionForgotten"));
       await load();
+    } catch (e) {
+      setMsg(echecReseau(e, tc));
     } finally {
       setBusy(null);
     }

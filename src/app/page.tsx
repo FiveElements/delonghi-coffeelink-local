@@ -20,9 +20,9 @@ import Icone from "./icons";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import Alerte from "./Alerte";
 import { useConfirm } from "./confirm";
-import { cleAnnonce, echecAnnonce } from "./register";
+import { echecAction, injoignable, raisonEchec } from "./register";
 // Le libelle d etat de la machine est partage avec /pilotage : voir machineState.ts.
-import { AGE_PERIME, AGE_PROGRESSION, fmtAge, sensorLabel, splitSensors, stateLabel, stepLabel, type HasTranslator, type Translator } from "./machineState";
+import { AGE_PERIME, AGE_PROGRESSION, fmtAge, sensorLabel, splitSensors, stateLabel, stepLabel, type HasTranslator } from "./machineState";
 import { Switch } from "@/ui/switch";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -359,8 +359,9 @@ export default function Boissons() {
        * `local_reg` qui prévient la machine, et lui seul. Quand l'annonce échoue, la réponse le
        * dit (`register.ok === false`) et il faut le dire aussi — sinon la page annonce « Allumer
        * envoyé » à une cafetière qui n'a rien entendu, relevé sur la machine réelle.
+       * `echecAction` (register.ts) est le même verdict pour toutes les pages d'action.
        */
-      const annonce = echecAnnonce(r);
+      const echec = echecAction(r, tc);
       /**
        * **Un compte rendu de succès VIDE est un choix, pas un oubli.** Depuis que la barre de
        * progression existe, « Commande envoyée » ne dit rien de plus que ce que la machine montre
@@ -371,16 +372,14 @@ export default function Boissons() {
        */
       const texte = ok(r);
       setReport(
-        r.error
-          ? { scope: cible, text: tc("error", { message: r.error }), kind: "err" }
-          : annonce
-            ? { scope: cible, text: tc(cleAnnonce(annonce)), kind: "err" }
-            : texte
-              ? { scope: cible, text: texte, kind: "ok" }
-              : null,
+        echec
+          ? { scope: cible, text: echec, kind: "err" }
+          : texte
+            ? { scope: cible, text: texte, kind: "ok" }
+            : null,
       );
       await apres?.();
-      return !r.error && !annonce;
+      return !echec;
     } catch (e) {
       // `String(e)` donnait « TypeError: Failed to fetch » — le nom d'une classe JavaScript là où
       // l'utilisateur attend de savoir si son café part. Une panne de liaison a sa phrase.
@@ -1269,7 +1268,7 @@ function PowerCard({
       </div>
 
       <div className="blocSuite">
-        <label htmlFor="profil-actif">{confirmed ? t("profileLabel") : t("profileUnknown")}</label>
+        <label id="profil-actif-libelle" htmlFor="profil-actif">{confirmed ? t("profileLabel") : t("profileUnknown")}</label>
         {/* **Une liste deroulante, comme le selecteur de la machine.** Cinq positions d'un meme
             selecteur, pas cinq commandes : c'est ce que la rangee de boutons peinait a dire, et ce
             qu'un `select` dit par construction. Il porte aussi l'etat sans le mettre en couleur et
@@ -1292,7 +1291,9 @@ function PowerCard({
           disabled={busy}
           onValueChange={(v) => onSelectProfile(Number(v))}
         >
-          <SelectTrigger id="profil-actif" className="w-full" title={t("profileSelectHint")}>
+          {/* `aria-labelledby` : le déclencheur Radix est un `<button role="combobox">`, qu'un
+              `<label htmlFor>` ne nomme pas de façon fiable. */}
+          <SelectTrigger id="profil-actif" aria-labelledby="profil-actif-libelle" className="w-full" title={t("profileSelectHint")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -1373,20 +1374,6 @@ function profileLabel(profiles: ProfileInfo[], id: number): string {
 
 
 
-/**
- * Un `fetch` qui rejette n'a pas atteint le serveur ; un `fetch` qui répond 500 l'a atteint. La
- * distinction décide de la phrase : dans le premier cas il n'y a rien à corriger côté machine, et
- * rien d'autre à proposer que de réessayer.
- */
-function injoignable(e: unknown): boolean {
-  return e instanceof TypeError;
-}
-
-/** La raison d'un échec, en langue d'intention plutôt qu'en nom de classe JavaScript. */
-function raisonEchec(e: unknown, tc: Translator): string {
-  if (injoignable(e)) return tc("serverUnreachable");
-  return tc("error", { message: e instanceof Error ? e.message : String(e) });
-}
 
 
 /**

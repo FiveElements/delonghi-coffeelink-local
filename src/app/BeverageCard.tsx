@@ -15,6 +15,24 @@ import { Button } from "@/ui/button";
 import { Card } from "@/ui/card";
 
 /**
+ * La trame « préparer » de l'éditeur, en hexadécimal — ou la raison pour laquelle il n'y en a pas.
+ *
+ * `encodeDispense` LÈVE sur une valeur non entière ou hors de sa largeur, et c'est voulu : la
+ * tronquer en silence ferait un autre café. Or le champ numérique de l'éditeur laisse taper « 40.5 »
+ * ou « 99999 » entre deux frappes, et ce panneau se rend à chacune : une exception ici emporterait
+ * toute la carte. On attrape donc AU RENDU, et l'on dit que l'aperçu est indisponible avec la phrase
+ * du constructeur. Arrondir dans l'éditeur aurait été plus discret, et faux : l'aperçu montrerait
+ * une trame que le champ ne dit pas, alors que `/api/command` refusera la même valeur.
+ */
+function apercuPreparer(beverageId: number, profile: number, params: RecipeParam[], indisponible: string): string {
+  try {
+    return encodeDispense(beverageId, profile, MODE.START, actionPreparer(params), params).hex;
+  } catch (e) {
+    return `${indisponible} — ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/**
  * **La carte d'une boisson — le composant que `/` et `/recettes` montent tous les deux.**
  *
  * Elle vivait dans `page.tsx`, donc n'appartenait qu'a l'accueil. `/recettes` affichait ses
@@ -495,7 +513,7 @@ export default function BeverageCard({
         {/* La MÊME phrase que la trame calculée d'au-dessus, avec une troisième nature : trois
             libellés pour trois trames auraient laissé « calculée » se dire de trois façons. */}
         <span className="k">{t("computedFrame", { kind: t("framePrepare") })}</span>
-        <span className="mono">{encodeDispense(bev.id, profile, MODE.START, actionPreparer(params), params).hex}</span>
+        <span className="mono">{apercuPreparer(bev.id, profile, params, t("frameUnavailable"))}</span>
       </div>
     </>
   );

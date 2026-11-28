@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { mfetch } from "../machine";
+import { echecAction, raisonEchec } from "../register";
 import { useBeverageLabel } from "@/i18n/labels";
 import Icone from "../icons";
 import { attendreLibre, useMachinePush } from "../events";
@@ -261,8 +262,10 @@ export default function Statistiques() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ from, qty, sync: i === ranges.length - 1 }),
         }).then((x) => x.json());
-        if (r.error) {
-          setMsg(tc("error", { message: r.error }));
+        // `echecAction` : une plage jamais annoncée à la machine ne rendra rien — inutile d'attendre.
+        const echec = echecAction(r, tc);
+        if (echec) {
+          setMsg(echec);
           return;
         }
         // Le serveur refuse une seconde lecture tant que la précédente tourne (409) : on attend
@@ -282,6 +285,9 @@ export default function Statistiques() {
       }
       setMsg(t("readDone"));
       await load();
+    } catch (e) {
+      // Sans ce `catch`, une panne de liaison laissait « Lecture de … » affiché pour toujours.
+      setMsg(raisonEchec(e, tc));
     } finally {
       setBusy(false);
     }
@@ -307,11 +313,14 @@ export default function Statistiques() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ named: portee }),
       }).then((x) => x.json());
-      if (r.error) return setMsgNamed(tc("error", { message: r.error }));
+      const echec = echecAction(r, tc);
+      if (echec) return setMsgNamed(echec);
       if (r.empty) return setMsgNamed(t("namedNothingToRead", { total: r.total }));
       setMsgNamed(r.skipped ? t("namedSkipped", { count: r.skipped }) : t("readDone"));
       if (live) await attendreLibre(busyRef);
       await load();
+    } catch (e) {
+      setMsgNamed(raisonEchec(e, tc));
     } finally {
       setBusy(false);
     }
@@ -438,7 +447,7 @@ export default function Statistiques() {
       type="button"
       variant="discret"
       size="commande"
-      className="iconBtn iconSeul"
+      className="iconBtn iconSeul px-2.5"
       disabled={!lignes}
       aria-label={nom}
       title={t("copyTitle")}

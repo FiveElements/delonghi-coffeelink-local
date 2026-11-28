@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { mfetch } from "../machine";
 import { useMachinePush } from "../events";
 import { useConfirm } from "../confirm";
+import { compteRendu, echecReseau } from "../register";
 import Icone from "../icons";
 import { useBeverageLabel } from "../../i18n/labels";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
@@ -62,8 +63,8 @@ const SCOPES: { value: Scope; key: string }[] = [
 
 /**
  * **Un seul éditeur pour les deux familles de noms.** Un profil et une recette perso se renomment
- * par la même trame à un octet de commande près (`0xA5` / `0xAB`), avec la même contrainte : 20
- * caractères, et une icône obligatoire. Deux formulaires auraient divergé sur la borne.
+ * par la même trame à un octet de commande près (`0xA5` / `0xAB`), avec la même contrainte : 10
+ * caractères (20 octets UTF-16BE — le serveur refuse au-delà), et une icône obligatoire. Deux formulaires auraient divergé sur la borne.
  */
 function Editeur({
   edition, setEdition, busy, onEcrire, t, tc,
@@ -84,7 +85,7 @@ function Editeur({
             id={`nom-${edition.kind}-${edition.index}`}
             className="champ"
             value={edition.name}
-            maxLength={20}
+            maxLength={10}
             onChange={(e) => setEdition({ ...edition, name: e.target.value })}
             placeholder={t("renamePlaceholder")}
           />
@@ -137,8 +138,10 @@ export default function Profils() {
   /** Compte rendu de la dernière action : il vivait dans un bandeau `.warn`, y compris pour un
    *  succès, et n'était annoncé à personne. */
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
-  const rendre = (r: any, ok: string) =>
-    setMsg(r.error ? { text: tc("error", { message: r.error }), kind: "err" } : { text: ok, kind: "ok" });
+  /* `compteRendu` lit aussi l'annonce (voir `register.ts`) ; `rate` est le `catch` commun des
+     gestes de la page — une panne de liaison s'affiche au lieu de rejeter en silence. */
+  const rendre = (r: unknown, ok: string) => setMsg(compteRendu(r, ok, tc));
+  const rate = (e: unknown) => setMsg(echecReseau(e, tc));
   const { demander, dialogue } = useConfirm();
   const [showProps, setShowProps] = useState(false);
 
@@ -180,6 +183,8 @@ export default function Profils() {
       }).then((x) => x.json());
       rendre(r, t("importQueued", { count: r.queued }));
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -198,6 +203,8 @@ export default function Profils() {
         body: JSON.stringify({ action: "selectProfile", profileId: id }),
       }).then((x) => x.json());
       rendre(r, t("activateSent", { label: r.program }));
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -227,6 +234,8 @@ export default function Profils() {
       rendre(r, t("renameSent", { name: edition.name }));
       if (!r.error) setEdition(null);
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -261,6 +270,8 @@ export default function Profils() {
       rendre(r, t("favoritesSent", { id: favoris.profileId }));
       if (!r.error) setFavoris(null);
       await refresh();
+    } catch (e) {
+      rate(e);
     } finally {
       setBusy(false);
     }
@@ -284,9 +295,10 @@ export default function Profils() {
         <p className="chapeau">{t("importNote")}</p>
         <div className="row">
           <div>
-            <label htmlFor="scope">{t("whatToRead")}</label>
+            <label id="scope-libelle" htmlFor="scope">{t("whatToRead")}</label>
             <Select value={scope} onValueChange={(v) => setScope(v as Scope)}>
-              <SelectTrigger id="scope" className="w-full"><SelectValue /></SelectTrigger>
+              {/* Déclencheur Radix = `<button>` : nommé par `aria-labelledby`, pas par le `<label>`. */}
+              <SelectTrigger id="scope" aria-labelledby="scope-libelle" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {SCOPES.map((s) => (
                   <SelectItem key={s.value} value={s.value}>
@@ -524,7 +536,7 @@ export default function Profils() {
                     <TableCell className="num">{c.beverageId}</TableCell>
                     <TableCell className="titreLigne">
                       <Button type="button" variant="discret" size="commande"
-                        className="iconBtn iconSeul"
+                        className="iconBtn iconSeul px-2.5"
                         disabled={busy}
                         onClick={() => setEdition(edition?.kind === "custom" && edition.index === c.slot ? null : { kind: "custom", index: c.slot, name: c.name ?? "", icon: String(c.icon ?? 0) })}
                         aria-label={t("rename")}

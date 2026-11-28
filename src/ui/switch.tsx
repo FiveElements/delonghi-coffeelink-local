@@ -57,6 +57,12 @@ function Switch({
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ambre",
         "disabled:cursor-not-allowed disabled:opacity-45",
         "data-[size=sm]:h-7 data-[size=sm]:w-[52px] data-[size=default]:h-[42px] data-[size=default]:w-[76px]",
+        /* **Au doigt, l'interrupteur d'un RÉGLAGE grossit** (64 × 36, poignée 28). Celui de
+           l'alimentation porte déjà sa taille de commande principale (76 × 42). Ces tailles
+           vivaient dans un bloc `pointer: coarse` de surfaces.css, qui perdait contre les
+           utilitaires — et dont le `transform` s'ADDITIONNAIT au `translate` de Tailwind 4 :
+           24 + 28 = 52 px de course, poignée sortie de sa piste. Ici, une seule propriété. */
+        "tactile:data-[size=sm]:h-9 tactile:data-[size=sm]:w-16",
         "data-[state=unchecked]:bg-creux data-[state=checked]:bg-vert-verre",
         /* La position inconnue reprend la piste et la rend à sa hachure, quel que soit l'état
            coché — et rend son opacité pleine même désactivée, puisqu'elle n'est pas un refus. */
@@ -84,6 +90,7 @@ function Switch({
           "pointer-events-none absolute block rounded-touche ring-0 transition-[transform,background-color,left] duration-[180ms]",
           "shadow-[inset_0_1px_0_0_var(--color-arete-haute),0_1px_2px_-1px_var(--color-arete-basse)]",
           "group-data-[size=sm]/switch:size-5 group-data-[size=default]/switch:size-[34px]",
+          "tactile:group-data-[size=sm]/switch:size-7",
           inconnu
             // Centrée, et en encre douce : la poignée ne prétend plus rien.
             ? "left-1/2 -translate-x-1/2 bg-encre-faible"
@@ -92,6 +99,9 @@ function Switch({
                 "group-data-[size=sm]/switch:left-[3px] group-data-[size=default]/switch:left-1",
                 "data-[state=unchecked]:translate-x-0",
                 "group-data-[size=sm]/switch:data-[state=checked]:translate-x-6",
+                /* Au doigt : 3 + 28 + 28 = 59 ≤ 64 — la poignée cochée reste dans sa piste, avec
+                   le même jeu qu'à la souris (3 px à gauche, 5 à droite ; 4 en haut et en bas). */
+                "tactile:group-data-[size=sm]/switch:data-[state=checked]:translate-x-7",
                 "group-data-[size=default]/switch:data-[state=checked]:translate-x-[34px]",
               ].join(" "),
         )}

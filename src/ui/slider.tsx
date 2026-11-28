@@ -60,7 +60,7 @@ function Slider({
       min={min}
       max={max}
       className={cn(
-        "relative flex h-7 w-full touch-none items-center select-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col",
+        "relative flex h-7 tactile:h-11 w-full touch-none items-center select-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col",
         className
       )}
       {...props}
@@ -89,9 +89,13 @@ function Slider({
           key={index}
           aria-label={ariaLabel}
           /* 14 × 24 : au-dessus du plancher de 24 px de cible une fois la piste comptée, sur
-             l'appareil tactile qui sert à piloter. Le curseur natif en donnait 14 de haut. */
+             l'appareil tactile qui sert à piloter. Le curseur natif en donnait 14 de haut.
+             Au doigt (`tactile:`), poignée 30 × 30 et zone de 44 px de haut sur la racine : ces
+             tailles vivaient dans un bloc `pointer: coarse` de surfaces.css, qui perdait contre
+             les utilitaires. La piste y descendait à 8 px — moins que ses 12 px actuels : cette
+             règle-là, écrite pour le natif de 6 px, n'est pas reprise. */
           className={cn(
-            "block h-6 w-3.5 shrink-0 cursor-pointer rounded-touche border-0 bg-aluminium",
+            "block h-6 w-3.5 tactile:size-[30px] shrink-0 cursor-pointer rounded-touche border-0 bg-aluminium",
             "shadow-[inset_0_1px_0_0_var(--color-arete-haute),0_1px_2px_-1px_var(--color-arete-basse)]",
             "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ambre",
             "disabled:pointer-events-none",

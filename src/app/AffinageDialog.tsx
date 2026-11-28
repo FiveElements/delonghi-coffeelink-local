@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { mfetch } from "./machine";
+import { echecAction, raisonEchec } from "./register";
 import Icone from "./icons";
 import { ImageCrema } from "./VignetteGrains";
 import { type Ask } from "./confirm";
@@ -159,6 +160,10 @@ export default function AffinageDialog({
       if (r.error) { setErreur(tc("error", { message: r.error })); return false; }
       setSim(r);
       return true;
+    } catch (e) {
+      // Sans ce `catch`, une panne de liaison laissait l'étape figée sans un mot.
+      setErreur(raisonEchec(e, tc));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -188,7 +193,10 @@ export default function AffinageDialog({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "dispense", beverageId: 1, profileId }),
           }).then((x) => x.json());
-          if (r.error) setErreur(tc("error", { message: r.error }));
+          // `echecAction` : une préparation acceptée mais jamais annoncée à la machine est un échec.
+          setErreur(echecAction(r, tc));
+        } catch (e) {
+          setErreur(raisonEchec(e, tc));
         } finally {
           setBusy(false);
         }

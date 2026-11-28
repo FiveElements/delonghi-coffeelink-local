@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { mfetch } from "../machine";
+import { echecAction, raisonEchec } from "../register";
 import Alerte, { TitreAlerte } from "../Alerte";
 import Icone from "../icons";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/ui/table";
@@ -97,6 +98,8 @@ export default function Systeme() {
   const [d, setD] = useState<Payload | null>(null);
   const [busy, setBusy] = useState(false);
   const [idMsg, setIdMsg] = useState<string | null>(null);
+  /** Échec du chargement initial : sans lui, une panne laissait « Interrogation… » à l'écran pour toujours. */
+  const [echecChargement, setEchecChargement] = useState<{ e: unknown } | null>(null);
   /**
    * **Les deux modes de monitor restés hors Wi-Fi.** `getByteMonitorMode` de l'application
    * décompilée construit trois trames — `0x60`, `0x70`, `0x75` — mais son service Wi-Fi n'envoie
@@ -120,8 +123,10 @@ export default function Systeme() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
       }).then((x) => x.json());
-      if (r.error) {
-        setSondeMsg(tc("error", { message: r.error }));
+      // `echecAction` : une sonde jamais annoncée à la machine n'attendra aucune réponse.
+      const echec = echecAction(r, tc);
+      if (echec) {
+        setSondeMsg(echec);
         return;
       }
       // La réponse arrive de façon asynchrone : la machine se connecte, prend la commande, puis
@@ -136,6 +141,8 @@ export default function Systeme() {
         }
       }
       setSondeMsg(t("probeSilent", { mode }));
+    } catch (e) {
+      setSondeMsg(raisonEchec(e, tc));
     } finally {
       setBusy(false);
     }
@@ -145,6 +152,11 @@ export default function Systeme() {
     setBusy(true);
     try {
       setD(await mfetch("/api/system").then((r) => r.json()));
+      setEchecChargement(null);
+    } catch (e) {
+      // L'exception est gardée brute et mise en phrase au rendu : `load` reste sans dépendance,
+      // donc l'effet de montage ne se relance pas.
+      setEchecChargement({ e });
     } finally {
       setBusy(false);
     }
@@ -165,8 +177,9 @@ export default function Systeme() {
     try {
       const before = d?.identification.at ?? 0;
       const r = await mfetch("/api/model", { method: "POST" }).then((x) => x.json());
-      if (r.error) {
-        setIdMsg(tc("error", { message: r.error }));
+      const echec = echecAction(r, tc);
+      if (echec) {
+        setIdMsg(echec);
         return;
       }
       for (let i = 0; i < 14; i++) {
@@ -179,12 +192,18 @@ export default function Systeme() {
         if (i === 13) setIdMsg(t("idNoAnswer"));
       }
       await load();
+    } catch (e) {
+      setIdMsg(raisonEchec(e, tc));
     } finally {
       setBusy(false);
     }
   }, [d, load, t, tc]);
 
-  if (!d) return <p className="sub">{t("probing")}</p>;
+  if (!d) {
+    return echecChargement
+      ? <p className="status err" role="status">{raisonEchec(echecChargement.e, tc)}</p>
+      : <p className="sub">{t("probing")}</p>;
+  }
 
   const fw = d.deviceSheet.firmware;
   const builtAt = String(fw.builtAt ?? "");
