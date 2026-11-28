@@ -20,6 +20,8 @@
  */
 
 /** Stride du bloc « nom » : 21 octets en classic (20 de nom + icône), 22 en Striker (+ mug). */
+import { trameEntiere } from "./trame-bornes.ts";
+
 export const STRIDE_CLASSIC = 21;
 export const STRIDE_STRIKER = 22;
 
@@ -104,7 +106,8 @@ export interface BlocNoms {
 export function decodeNames(b64: string, stride: number = STRIDE_CLASSIC): BlocNoms {
   const buf = Buffer.from(b64, "base64");
   if (buf.length < 8) throw new Error("trame trop courte");
-  const len = buf[1] + 1;
+  // Tronquée ou corrompue : refusée — sinon des noms coupés et des icônes `undefined` rangés en base.
+  const len = trameEntiere(buf, "bloc de noms");
   const offset = 6;
   const first = buf[4];
   const last = buf[5];
@@ -174,7 +177,7 @@ export interface Priorites { cmd: number; profileId: number; beverageIds: number
 export function decodePriorities(b64: string): Priorites {
   const buf = Buffer.from(b64, "base64");
   if (buf.length < 7) throw new Error("trame trop courte");
-  const len = buf[1] + 1;
+  const len = trameEntiere(buf, "ordre des favoris");
   const n = buf[1] - 6;
   const ids: number[] = [];
   for (let i = 0; i < n && 5 + i < len - 2; i++) ids.push(buf[5 + i]);
@@ -222,8 +225,8 @@ export interface SommesControle {
 export function decodeChecksums(b64: string): SommesControle {
   const buf = Buffer.from(b64, "base64");
   if (buf.length < 10) throw new Error("trame trop courte");
-  const len = buf[1] + 1;
   if (buf[2] !== 0xa3) throw new Error(`commande inattendue 0x${buf[2].toString(16)}`);
+  const len = trameEntiere(buf, "sommes de contrôle");
   const size = Math.floor((buf[1] - 9) / 2);
   if (size < 1 || size > 10) throw new Error(`nombre de profils invalide (${size})`);
   const be = (o: number) => (buf[o] << 8) | buf[o + 1];
@@ -284,7 +287,9 @@ export function decodeBeanSystem(b64: string): BeanSystem {
   // un grain fantôme annoncé comme actif. Les trames réelles font 53 octets.
   if (buf.length < 51) throw new Error(`trame trop courte (${buf.length} octets, 51 minimum)`);
   if (buf[2] !== 0xba) throw new Error(`commande inattendue 0x${buf[2].toString(16)}`);
-  const len = buf[1] + 1;
+  const len = trameEntiere(buf, "trame Bean System");
+  // L'octet 50 doit précéder le CRC : sinon `active` lirait un octet de CRC.
+  if (len - 2 <= 50) throw new Error(`trame Bean System trop courte (len annoncé ${len})`);
   const raw = buf.subarray(5, 45);
   const empty = raw.every((b) => b === 0);
   return {
@@ -423,6 +428,8 @@ export function decodeBeanSync(b64: string): BeanSync {
   // qu'aucun index ne porte — le genre de valeur qui traverse l'interface sans lever un mot.
   if (charge < 4 * (BEAN_SYNC_MOT_GRAIN + 1)) throw new Error(`charge utile trop courte (${charge} octets)`);
   if (charge % 4 !== 0) throw new Error(`charge utile de ${charge} octets, non multiple de 4`);
+  // Après les contrôles de forme (leurs messages disent mieux ce qui manque), avant toute lecture.
+  trameEntiere(buf, "d260_beansystem_sync_par");
   const mots: number[] = [];
   for (let i = 6; i + 4 <= fin; i += 4) mots.push(buf.readUInt32BE(i));
   return {

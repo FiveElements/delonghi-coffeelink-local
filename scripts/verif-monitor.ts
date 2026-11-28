@@ -20,6 +20,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { decodeMonitor, MONITOR_ETAPES, MONITOR_SWITCHES, MONITOR_ALARMS, type Monitor } from "../src/lib/monitor.ts";
+import { crcCcitt } from "../src/lib/trame-bornes.ts";
 
 const ICI = dirname(fileURLToPath(import.meta.url));
 const CAPTURES = join(ICI, "captures");
@@ -58,10 +59,27 @@ const charger = (nom: string): Trame[] => {
   ok("au repos aucune étape n'est nommée", m.etapeCle === null, `reçu ${m.etapeCle}`);
 }
 
-// ── Une trame tronquée perd la progression, pas le reste ─────────────────────────────────────
+// ── Une trame TRONQUÉE ou CORROMPUE est refusée — elle ne rend plus des 0 plausibles ─────────
 {
-  // Neuf octets : le minimum que `decodeMonitor` accepte (état + alarmes), pas de quoi lire 9-11.
-  const m = decodeMonitor(b64("d0 12 75 0f 02 00 01 08 00"));
+  const leve = (hex: string, motif: RegExp, nom: string) => {
+    let msg = "";
+    try { decodeMonitor(b64(hex)); } catch (e) { msg = e instanceof Error ? e.message : String(e); }
+    ok(nom, motif.test(msg), msg || "acceptée");
+  };
+  // 9 octets reçus pour 19 annoncés : c'était accepté, avec fonction/étape inventées à null.
+  leve("d0 12 75 0f 02 00 01 08 00", /tronquée/, "trame tronquée refusée");
+  // La trame de repos, un bit d'alarme basculé : sans CRC, une alarme fantôme.
+  leve("d0 12 75 0f 02 00 01 08 01 07 00 00 00 00 00 00 00 ce 67", /corrompue/, "trame corrompue refusée");
+}
+
+// ── Une trame COURTE mais entière perd la progression, pas le reste ─────────────────────────
+{
+  // `len` = 0x0a : état, capteurs, deux octets d'alarmes, puis le CRC — pas de quoi lire 9-11.
+  // Le CRC est calculé ici : c'est une trame entière que la machine pourrait émettre.
+  const court = Buffer.from([0xd0, 0x0a, 0x75, 0x0f, 0x02, 0x00, 0x01, 0x08, 0x00, 0, 0]);
+  const crc = crcCcitt(court);
+  court[9] = crc >> 8; court[10] = crc & 0xff;
+  const m = decodeMonitor(court.toString("base64"));
   ok("trame courte : l'état survit", m.stateByte === 0x02);
   ok("trame courte : fonction null", m.fonction === null, `reçu ${m.fonction}`);
   ok("trame courte : pourcentage null", m.pourcent === null, `reçu ${m.pourcent}`);

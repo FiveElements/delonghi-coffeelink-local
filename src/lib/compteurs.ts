@@ -234,5 +234,8 @@ export function lireCompteur(valeur: unknown): LectureCompteur | null {
 export function valeurAffichee(nom: string, brut: number | null | undefined): number | null {
   const info = compteurInfo(nom);
   if (!info || brut === null || brut === undefined) return null;
-  return info.divisor ? Math.round(brut / info.divisor) : brut;
+  // Au dixième, pas à l'entier : `Math.round` effaçait jusqu'à 0,5 L, soit une dizaine de tasses
+  // sur un compteur qui n'avance que de quelques décilitres par jour. Le dixième suffit à le voir
+  // bouger ; trois décimales afficheraient le demi-millilitre, plus fin que ce qu'on y lit.
+  return info.divisor ? Math.round((brut / info.divisor) * 10) / 10 : brut;
 }

@@ -231,11 +231,28 @@ const version = (): number => prepUne<{ user_version: number }>("PRAGMA user_ver
 const from = version();
 const fresh = from === 0;
 if (fresh) {
+  /**
+   * **La reprise des anciens JSON vit DANS la transaction qui crée le schéma.** Elle tournait
+   * après, sur une base déjà marquée v4 : un plantage au premier démarrage (une `lan-key.json`
+   * suffisait, voir `migrateFromJson`) laissait une base « à jour » et vide, que plus rien ne
+   * reprenait — `fresh` ne revient jamais. Ici, tout ou rien : un échec annule aussi le schéma,
+   * le démarrage suivant repart d'une base neuve, et les fichiers ne sont renommés qu'APRÈS le
+   * COMMIT — une coupure entre les deux laisse des fichiers en trop, jamais un rejeu.
+   */
+  let reprise: RepriseJson;
   db.exec("BEGIN");
-  db.exec(DDL);
-  db.exec(`INSERT INTO machines(id, createdAt, data) VALUES('${DEFAULT_MACHINE}', ${Date.now()}, '{"label":null}')`);
-  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-  db.exec("COMMIT");
+  try {
+    db.exec(DDL);
+    db.exec(`INSERT INTO machines(id, createdAt, data) VALUES('${DEFAULT_MACHINE}', ${Date.now()}, '{"label":null}')`);
+    reprise = migrateFromJson();
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw new Error(`création de la base impossible (${messageErreur(e)}) — rien n'a été écrit, les anciens fichiers JSON sont intacts`, { cause: e });
+  }
+  for (const p of reprise.aRetirer) { try { renameSync(p, `${p}.migrated`); } catch {} }
+  bootMessages.push(...reprise.messages);
 } else if (from < SCHEMA_VERSION) {
   migrateSchema(from);
 } else if (from > SCHEMA_VERSION) {
@@ -316,8 +333,6 @@ const q = {
   touchMcpToken: prep("UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?"),
   revokeMcpToken: prep("UPDATE mcp_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL"),
 };
-
-if (fresh) migrateFromJson();
 
 /** Toute écriture de données lues sur la machine passe par ici, dans une seule transaction. */
 function tx<T>(fn: () => T): T {
@@ -473,13 +488,23 @@ export function machineExists(id: string): boolean {
  * L'identifiant est **frappé ici**, jamais fourni par l'appelant : c'est ce qui garantit qu'il
  * reste dans la forme `m<n>`, qu'il ne collisionne pas, et qu'aucune requête ne peut se voir
  * imposer une valeur choisie ailleurs.
+ *
+ * **Jamais un identifiant déjà servi**, même supprimé : le navigateur garde la machine courante
+ * dans `localStorage`, et un `m3` recréé après suppression aurait silencieusement repris la
+ * place de l'ancien dans un onglet resté ouvert. Le plus haut numéro attribué est donc gardé dans
+ * `settings` (`SEQ_MACHINES`) — pas de nouvelle version de schéma. Une base antérieure n'a pas ce
+ * compteur : elle repart du plus grand identifiant existant, seul souvenir qu'elle en ait.
  */
+const SEQ_MACHINES = "machineSeq";
+const numeroMachine = (id: string) => Number(String(id).replace(/^m/, "")) || 0;
 export function createMachine({ label = null }: { label?: string | null } = {}): { id: string; createdAt: number; label: string | null } {
   return tx(() => {
-    const used = q.listMachines.all().map((r) => Number(String(r.id).replace(/^m/, "")) || 0);
-    const id = `m${Math.max(0, ...used) + 1}`;
+    const used = q.listMachines.all().map((r) => numeroMachine(r.id));
+    const n = Math.max(0, getSetting<number>(SEQ_MACHINES) ?? 0, ...used) + 1;
+    const id = `m${n}`;
     const createdAt = Date.now();
     q.putMachine.run({ id, createdAt, data: JSON.stringify({ label }) });
+    setSetting(SEQ_MACHINES, n);
     return { id, createdAt, label };
   });
 }
@@ -503,6 +528,9 @@ export function setMachineLabel(id: string, label: string | null | undefined): M
 export function deleteMachine(id: string): boolean {
   return tx(() => {
     if (!q.getMachine.get(String(id))) return false;
+    // Le numéro supprimé reste « servi » : sans ceci, supprimer la plus récente sur une base sans
+    // compteur la laisserait se réattribuer à la création suivante.
+    setSetting(SEQ_MACHINES, Math.max(getSetting<number>(SEQ_MACHINES) ?? 0, numeroMachine(String(id))));
     q.delMachine.run(String(id));
     return true;
   });
@@ -809,81 +837,123 @@ function creerStoreMachine(machine: string) {
  * Ces fichiers datent d'avant la notion de plusieurs machines : tout va donc dans `m1`.
  */
 /**
- * Les anciens fichiers, tels que la version précédente de CE serveur les écrivait. Rien n'est
- * revalidé — exactement comme avant le typage : la migration reprend ce qu'elle trouve, et une
- * forme inattendue lève dans la transaction, qui s'annule.
+ * Les anciens fichiers, tels que la version précédente de CE serveur les écrivait. Instants et
+ * entiers sont ramenés à ce que `STRICT` accepte, ou la ligne est rejetée en le disant ; toute
+ * autre forme inattendue lève dans la transaction de création, qui s'annule entière.
  */
 interface AncienCache {
-  props?: Record<string, { at?: number; kind?: string | null; [champ: string]: unknown }>;
-  beanSystems?: Record<string, { index: number; at?: number }>;
-  stats?: Record<string, { value: number; at?: number }>;
+  props?: Record<string, { at?: unknown; kind?: unknown; [champ: string]: unknown } | null>;
+  beanSystems?: Record<string, { index?: unknown; at?: unknown } | null>;
+  stats?: Record<string, { value?: unknown; at?: unknown } | null>;
   [cle: string]: unknown;
 }
 interface AnciennesRecettes { recipes?: unknown }
 interface AncienneCle { lanip_key?: string; lanip_key_id?: number | string }
 
-function migrateFromJson() {
+/** Ce que la reprise rend : les fichiers à renommer une fois le COMMIT passé, et ce qu'il faut dire. */
+interface RepriseJson { aRetirer: string[]; messages: string[] }
+
+/**
+ * Appelée au milieu de la transaction de création (voir plus haut) : elle n'ouvre donc pas la
+ * sienne, et prépare ses propres requêtes — `q` et `forMachine` sont déclarés plus bas dans le
+ * module, encore en zone morte à cet instant. C'est exactement ce qui faisait lever
+ * « Cannot access 'bound' before initialization » dès qu'une `lan-key.json` était présente.
+ */
+function migrateFromJson(): RepriseJson {
   const M = DEFAULT_MACHINE;
+  const messages: string[] = [];
+  const aRetirer: string[] = [];
   // `T` déclare la forme attendue du fichier (voir `AncienCache`) : c'est l'assignation d'un
   // `JSON.parse`, pas une vérification — la même confiance qu'avant, désormais écrite.
   const read = <T>(file: string): { data: T; path: string } | null => {
     const p = join(DIR, file);
     if (!existsSync(p)) return null;
     try { return { data: JSON.parse(readFileSync(p, "utf8")), path: p }; } catch (e) {
-      bootMessages.push(`migration : ${file} illisible (${messageErreur(e)}) — ignoré, l'ancien fichier est conservé`);
+      messages.push(`migration : ${file} illisible (${messageErreur(e)}) — ignoré, l'ancien fichier est conservé`);
       return null;
     }
   };
-  const retire = (path: string) => { try { renameSync(path, `${path}.migrated`); } catch {} };
   const counts: string[] = [];
+  const putProp = db.prepare("INSERT INTO props(machine, name, at, kind, data) VALUES(:machine, :name, :at, :kind, :data) ON CONFLICT(machine, name) DO UPDATE SET at = :at, kind = :kind, data = :data");
+  const putBean = db.prepare("INSERT INTO bean_systems(machine, idx, at, data) VALUES(:machine, :idx, :at, :data) ON CONFLICT(machine, idx) DO UPDATE SET at = :at, data = :data");
+  const putStat = db.prepare("INSERT INTO stats(machine, id, value, at) VALUES(:machine, :id, :value, :at) ON CONFLICT(machine, id) DO UPDATE SET value = :value, at = :at");
+  const putRecipe = db.prepare("INSERT INTO recipes(machine, id, updatedAt, data) VALUES(:machine, :id, :updatedAt, :data) ON CONFLICT(machine, id) DO UPDATE SET updatedAt = :updatedAt, data = :data");
+  const putMeta = db.prepare("INSERT INTO meta(machine, key, value, at) VALUES(:machine, :key, :value, :at) ON CONFLICT(machine, key) DO UPDATE SET value = :value, at = :at");
+
+  /**
+   * **Un instant ou un entier venu d'un vieux JSON, ramené à ce que `STRICT` accepte.** Une date
+   * texte (`"2024-01-01"`) est convertie et comptée ; ce qui ne se convertit pas rejette la LIGNE,
+   * nommée dans les messages — jamais tout le fichier, et jamais en silence.
+   */
+  const rejets: string[] = [];
+  let converties = 0;
+  const instant = (v: unknown): number | null => {
+    if (v === undefined || v === null) return Date.now();
+    if (typeof v === "number" && Number.isInteger(v)) return v;
+    const t = typeof v === "string" ? Date.parse(v) : NaN;
+    if (Number.isFinite(t)) { converties++; return t; }
+    return null;
+  };
+  const entier = (v: unknown): number | null => {
+    const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+    return typeof n === "number" && Number.isInteger(n) ? n : null;
+  };
 
   const machine = read<AncienCache>("machine-beverages.json");
   if (machine) {
     const s = machine.data;
-    tx(() => {
-      for (const [name, p] of Object.entries(s.props ?? {})) {
-        const { at = Date.now(), kind = null, ...rest } = p;
-        q.putProp.run({ machine: M, name, at, kind, data: JSON.stringify(rest) });
+    for (const [name, p] of Object.entries(s.props ?? {})) {
+      const { at, kind = null, ...rest } = p ?? {};
+      const t = instant(at);
+      if (t === null) { rejets.push(`propriété ${name} (at ${JSON.stringify(at)})`); continue; }
+      putProp.run({ machine: M, name, at: t, kind: kind == null ? null : String(kind), data: JSON.stringify(rest) });
+    }
+    for (const bs of Object.values(s.beanSystems ?? {})) {
+      const idx = entier(bs?.index), t = instant(bs?.at);
+      if (idx === null || t === null) { rejets.push(`profil de grains ${JSON.stringify(bs?.index)}`); continue; }
+      putBean.run({ machine: M, idx, at: t, data: JSON.stringify(bs) });
+    }
+    for (const [id, st] of Object.entries(s.stats ?? {})) {
+      const n = entier(id), v = entier(st?.value), t = instant(st?.at);
+      if (n === null || v === null || t === null) { rejets.push(`statistique ${id}`); continue; }
+      putStat.run({ machine: M, id: n, value: v, at: t });
+    }
+    for (const key of ["checksums", "checksumsPrev", "checksumsAtImport", "dsn", "activeProfile", "importedAt"]) {
+      if (s[key] !== undefined && s[key] !== null) {
+        putMeta.run({ machine: M, key, value: JSON.stringify(s[key]), at: Date.now() });
       }
-      for (const bs of Object.values(s.beanSystems ?? {})) {
-        q.putBean.run({ machine: M, idx: bs.index, at: bs.at ?? Date.now(), data: JSON.stringify(bs) });
-      }
-      for (const [id, st] of Object.entries(s.stats ?? {})) {
-        q.putStat.run({ machine: M, id: Number(id), value: st.value, at: st.at ?? Date.now() });
-      }
-      for (const key of ["checksums", "checksumsPrev", "checksumsAtImport", "dsn", "activeProfile", "importedAt"]) {
-        if (s[key] !== undefined && s[key] !== null) {
-          q.putMeta.run({ machine: M, key, value: JSON.stringify(s[key]), at: Date.now() });
-        }
-      }
-    });
+    }
     counts.push(`${Object.keys(s.props ?? {}).length} propriétés`, `${Object.keys(s.stats ?? {}).length} statistiques`, `${Object.keys(s.beanSystems ?? {}).length} profils de grains`);
-    retire(machine.path);
+    aRetirer.push(machine.path);
   }
 
   const recipes = read<AnciennesRecettes>("recipes.json");
   if (recipes) {
-    const list: { id: unknown; updatedAt?: number }[] = Array.isArray(recipes.data.recipes) ? recipes.data.recipes : [];
-    tx(() => {
-      for (const r of list) {
-        q.putRecipe.run({ machine: M, id: String(r.id), updatedAt: r.updatedAt ?? Date.now(), data: JSON.stringify(r) });
-      }
-    });
+    const list: { id: unknown; updatedAt?: unknown }[] = Array.isArray(recipes.data.recipes) ? recipes.data.recipes : [];
+    for (const r of list) {
+      const t = instant(r?.updatedAt);
+      if (t === null) { rejets.push(`recette ${JSON.stringify(r?.id)} (updatedAt ${JSON.stringify(r?.updatedAt)})`); continue; }
+      // La date convertie va aussi dans `data` : c'est ce que `listRecipes` rend, pas la colonne.
+      putRecipe.run({ machine: M, id: String(r.id), updatedAt: t, data: JSON.stringify({ ...r, updatedAt: t }) });
+    }
     counts.push(`${list.length} recettes`);
-    retire(recipes.path);
+    aRetirer.push(recipes.path);
   }
 
   const lan = read<AncienneCle>("lan-key.json");
   if (lan?.data?.lanip_key) {
     // Pas de trace de la clé dans les messages de démarrage : seul son key_id est public.
-    forMachine(M).setMeta("lanKey", lan.data);
+    putMeta.run({ machine: M, key: "lanKey", value: JSON.stringify(lan.data), at: Date.now() });
     counts.push(`clé LAN (key_id ${lan.data.lanip_key_id})`);
-    retire(lan.path);
+    aRetirer.push(lan.path);
   }
 
   if (counts.length) {
-    bootMessages.push(`migration JSON → SQLite : ${counts.join(", ")} ; anciens fichiers renommés en .migrated`);
+    messages.push(`migration JSON → SQLite : ${counts.join(", ")} ; anciens fichiers renommés en .migrated`);
   }
+  if (converties) messages.push(`migration JSON : ${converties} date(s) texte converties en millisecondes`);
+  if (rejets.length) messages.push(`migration JSON : ${rejets.length} ligne(s) REJETÉE(S), valeur non convertible — ${rejets.join(", ")} (restent lisibles dans les fichiers .migrated)`);
+  return { aRetirer, messages };
 }
 
 // ---------------------------------------------------------------- vue d'ensemble

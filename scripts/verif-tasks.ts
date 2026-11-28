@@ -96,6 +96,74 @@ test("la file plafonne au lieu de gonfler", () => {
   eq(enfiler(f, commande("de trop"), 0), { ok: false, raison: "pleine" }, "refus");
 });
 
+test("un arrêt passe même quand la file est pleine", () => {
+  const f = nouvelleFile();
+  for (let i = 0; i < 32; i++) enfiler(f, commande(`c${i}`), 0);
+  const r = accepte(enfiler(f, commande("Arrêt", RANG.URGENT), 0));
+  eq(tete(f).label, "Arrêt", "en tête");
+  eq(r.tache.label, "Arrêt", "acceptée");
+});
+test("une fusion relève la jumelle au rang le plus élevé, et la reclasse", () => {
+  const f = nouvelleFile();
+  enfiler(f, commande("Allumer"), 0);
+  enfiler(f, lecture("Profils", ["p"]), 0);
+  const fond = accepte(enfiler(f, tache({ label: "Compteurs", rang: RANG.LECTURE_BASSE, pas: [pasLecture("x")], cle: "k" }), 0)).tache;
+  const r = accepte(enfiler(f, tache({ label: "Compteurs", rang: RANG.COMMANDE, pas: [pasLecture("x")], cle: "k" }), 0));
+  eq(r.fusion, true, "fusion");
+  eq(fond.rang, RANG.COMMANDE, "rang relevé");
+  eq(f.liste.map((t) => t.label), ["Allumer", "Compteurs", "Profils"], "reclassée, FIFO à rang égal");
+});
+
+console.log("\n— préemption à une frontière de pas seulement —");
+test("une commande ne suspend PAS une lecture dont le pas est en vol", () => {
+  const f = nouvelleFile();
+  enfiler(f, stats("Statistiques", 2), 0);
+  aServir(f, 0);                                  // 1re requête en vol
+  enfiler(f, commande("Allumer"), 100);
+  eq(tete(f).label, "Statistiques", "la lecture garde la tête tant que sa réponse est attendue");
+  eq(aServir(f, 200).quoi, "soutien", "rien d'autre n'est servi");
+  reponse(f, { reponse: true }, 1000);            // frontière de pas
+  const s = aServir(f, 1100);
+  eq(s.quoi === "pas" ? s.tache.label : s.quoi, "Allumer", "la commande prend la tête à la frontière");
+  eq(f.liste[1].i, 1, "la lecture reprendra au pas suivant");
+});
+test("un pas de lecture de propriété en vol n'est pas suspendu non plus", () => {
+  const f = nouvelleFile();
+  enfiler(f, lecture("Import", ["a", "b"]), 0);
+  aServir(f, 0);
+  enfiler(f, commande("Allumer"), 100);
+  eq(tete(f).label, "Import", "pas en vol");
+  tic(f, 200);
+  eq(tete(f).label, "Import", "un tic ne reclasse pas non plus");
+});
+test("un ARRÊT coupe une préparation dont la fenêtre court (rien n'est en vol)", () => {
+  // Un pas « fenetre » servi n'attend aucune réponse : attendre sa fin ferait patienter l'arrêt
+  // 75 s, le temps d'une préparation entière.
+  const f = nouvelleFile();
+  enfiler(f, tache({ label: "Préparer", rang: RANG.COMMANDE, pas: [pasTrame("Préparer", "AAA=", { attente: "fenetre", ms: 75000 })] }), 0);
+  aServir(f, 0);
+  enfiler(f, commande("Arrêt", RANG.URGENT), 1000);
+  eq(tete(f).label, "Arrêt", "l'arrêt prend la tête tout de suite");
+});
+test("la réponse tardive de A ne valide pas le pas de B (cmd fourni)", () => {
+  const f = nouvelleFile();
+  const a = tache({ label: "A", rang: RANG.LECTURE_BASSE, pas: [pasTrame("A", "AAA=", { attente: "reponse", cmd: 0xa2 })] });
+  enfiler(f, a, 0);
+  aServir(f, 0);                                  // A en vol
+  const b = tache({ label: "B", rang: RANG.LECTURE, pas: [pasTrame("B", "AAA=", { attente: "reponse", cmd: 0xa3 })] });
+  enfiler(f, b, 100);
+  // A expire sans réponse (reprise en queue) : frontière de pas, B prend la tête et part.
+  f.dernierContact = 100;
+  tic(f, DELAIS.reponse + 1);
+  aServir(f, DELAIS.reponse + 2);
+  eq(tete(f).label, "B", "B en tête");
+  eq(b.pas[0].etat, "servi", "B en vol");
+  // La réponse de A arrive enfin : elle ne doit pas valider B.
+  eq(reponse(f, { reponse: true, cmd: 0xa2 }, DELAIS.reponse + 500), null, "0xA2 n'apparie pas le pas 0xA3 (A n'est plus servi)");
+  eq(b.faits, 0, "B intact");
+  eq(reponse(f, { reponse: true, cmd: 0xa3 }, DELAIS.reponse + 600)?.label, "B", "sa propre réponse l'apparie");
+});
+
 console.log("\n— échéances, reprise, fin —");
 test("un pas de lecture manqué repart UNE fois, puis compte comme perdu", () => {
   const f = nouvelleFile();

@@ -48,6 +48,23 @@ export function crcCcitt(b: ArrayLike<number>): number {
   return c & 0xffff;
 }
 
+/**
+ * **Une trame reçue est-elle entière et intacte ?** Rend sa taille annoncée (`len + 1`), ou LÈVE.
+ *
+ * Les décodeurs lisaient `buf[i]` sans savoir si l'octet existait : une trame tronquée rendait des
+ * `undefined` devenus 0, une trame corrompue des valeurs plausibles. Le CRC se vérifie sur les
+ * `len + 1` octets annoncés — vérifié sur toutes les trames réelles des captures (`0x75`) et des
+ * scripts de vérification : la machine le pose toujours, et la même formule que nos requêtes.
+ */
+export function trameEntiere(b: ArrayLike<number>, quoi = "trame"): number {
+  const n = (b[1] ?? 0) + 1;
+  if (b.length < 4 || b.length < n) throw new Error(`${quoi} tronquée (${b.length} octets reçus, ${n} annoncés)`);
+  const crc = crcCcitt(Array.prototype.slice.call(b, 0, n) as number[]);
+  const lu = (b[n - 2] << 8) | b[n - 1];
+  if (lu !== crc) throw new Error(`${quoi} corrompue (CRC lu ${lu.toString(16)}, calculé ${crc.toString(16)})`);
+  return n;
+}
+
 /** `"d0 37 b0 …"` — le même espacement que le `hex` des décodeurs, pour que les deux se comparent. */
 export function hexEspace(b: ArrayLike<number>): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join(" ");

@@ -92,6 +92,31 @@ export interface ContexteArguments {
   params?: Readonly<Partial<Record<number, { label?: string; unit?: string }>>>;
 }
 
+/** Les entrées `id → valeur` d'une trame `0x83` (sans horodatage), largeurs selon `TWO`. */
+function entrees0x83(t: Uint8Array): { id: number; v: number }[] {
+  const fin = t.length - 2;
+  const out: { id: number; v: number }[] = [];
+  for (let i = 6; i < fin - 1;) {
+    const id = t[i++];
+    if (i >= fin - 1) break;
+    const large = TWO.has(id);
+    out.push({ id, v: large ? t[i] * 256 + t[i + 1] : t[i] });
+    i += large ? 2 : 1;
+  }
+  return out;
+}
+
+/**
+ * **Le profil d'une `0x83` est-il illisible ?** `PREPARE_INVERSION` vaut 6 (`trame-boisson.ts`),
+ * donc son bit 0x04 tombe sur le bit bas du profil : profil 2 et profil 3 donnent le même octet.
+ * L'inversion se reconnaît comme l'app la décide — paramètre INVERSION (12) à 1 — ET à l'octet
+ * (action 2 avec le bit 0x04 levé). Le bit seul ne suffit pas : tout profil impair le lève aussi.
+ */
+function inversionAmbigue(t: Uint8Array): boolean {
+  const dernier = t[t.length - 3] ?? 0;
+  return (dernier & 0x07) === 0x06 && entrees0x83(t).some((e) => e.id === 12 && e.v === 1);
+}
+
 /**
  * @param t la trame ECAM, **sans** les 4 octets d'horodatage
  * @returns les arguments en clair, ou `null` si la commande n'en a pas / est inconnue
@@ -109,24 +134,22 @@ export function argumentsTrame(t: Uint8Array | null | undefined, { boisson, regl
       const mode = t[5] & 0x7f, verif = (t[5] & 0x80) !== 0;
       const dernier = t[fin - 1];
       const prof = dernier >> 2, act = dernier & 0x03;
+      // Inversion : le bit 0x04 de l'action a écrasé le bit bas du profil — on donne les deux
+      // candidats plutôt qu'un profil faux (voir `inversionAmbigue`).
+      const profLu = inversionAmbigue(t) ? `${prof - 1} ou ${prof} (inversion)` : `${prof}`;
       // Le mode DONTCARE (0) avec l'action SAVE (1) est la seule ÉCRITURE PERSISTANTE de cette
       // commande : elle remplace la recette d'un profil dans l'appareil. La dire en capitales,
       // c'est la seule chose qui la distingue d'un café lancé, à un octet près.
       const quoi = mode === 0 ? (act === 1 ? "ENREGISTRER dans le profil" : "écriture profil")
         : mode === 2 ? "ARRÊTER" : "préparer";
       const ps: string[] = [];
-      for (let i = 6; i < fin - 1;) {
-        const id = t[i++];
-        if (i >= fin - 1) break;
-        const large = TWO.has(id);
-        const v = large ? t[i] * 256 + t[i + 1] : t[i];
-        i += large ? 2 : 1;
+      for (const { id, v } of entrees0x83(t)) {
         const p = params[id];
         // L'unité « niveau » n'est pas une unité, c'est notre mot pour « sans unité » : l'écrire
         // donnerait « Arôme 3 niveau ».
         ps.push(`${p?.label ?? `param ${id}`} ${v}${p?.unit && p.unit !== "niveau" ? ` ${p.unit}` : ""}`);
       }
-      return `${quoi} ${boisson(t[4])} · profil ${prof}${verif ? " · vérification" : ""}${ps.length ? ` · ${ps.join(", ")}` : ""}`;
+      return `${quoi} ${boisson(t[4])} · profil ${profLu}${verif ? " · vérification" : ""}${ps.length ? ` · ${ps.join(", ")}` : ""}`;
     }
     // Miroir de `frameTurnOn` / `frameTurnOff`. Le rinçage est dit : allumer n'est pas anodin.
     case 0x84:
@@ -383,12 +406,15 @@ export function describeFrame(ecamB64: unknown, { octets = true }: { octets?: bo
  * Deux dispositions, relevées dans les constructeurs de trames de `server.ts` :
  * - `0xA9` : `0D 06 A9 F0 <profil> <crc>` — le profil est en clair à l'octet 4 ;
  * - `0x83` : le profil est encodé `(profil << 2) | action` dans le dernier octet avant le CRC.
+ *
+ * Une préparation **inversée** rend `null` : son action (6) a écrasé le bit bas du profil, et
+ * poser un profil voisin dans `m.activeProfile` serait pire que de ne rien poser.
  */
 export function profilVise(ecamB64: unknown): number | null {
   try {
     const { cmd, trame } = opTrame(ecamB64);
     if (cmd === 0xa9) return trame[4] ?? null;
-    if (cmd === 0x83) return (trame[trame.length - 3] ?? 0) >> 2;
+    if (cmd === 0x83) return inversionAmbigue(trame) ? null : (trame[trame.length - 3] ?? 0) >> 2;
   } catch { /* trame illisible : aucun profil à en tirer */ }
   return null;
 }

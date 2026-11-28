@@ -287,6 +287,9 @@ export function vue<M>(file: FileTaches<M>) {
  * « Suspendue » et non « annulée » : la tâche évincée reste dans la liste avec ses pas restants et
  * **reprend** quand l'intruse a fini. C'est exactement ce que l'écrasement détruisait.
  *
+ * Deux exceptions, chacune pour la sûreté : la suspension attend la fin d'un pas en vol (`enVol`),
+ * et `URGENT` échappe au plafond `MAX_FILE`.
+ *
  */
 export type ResultatEnfiler<M> =
   | { ok: true; fusion?: true; tache: Tache<M> }
@@ -297,16 +300,57 @@ export function enfiler<M>(file: FileTaches<M>, t: Tache<M>, maintenant: number,
   // en cours — celle-là a déjà servi une partie de ses pas, la fusionner perdrait le reste.
   if (t.cle) {
     const jumelle = file.liste.find((x) => x.cle === t.cle && x.etat === "attente");
-    if (jumelle) return { ok: true, fusion: true, tache: jumelle };
+    if (jumelle) {
+      // La jumelle prend le rang le plus élevé des deux, et se reclasse : sinon une demande
+      // urgente fusionnée dans une lecture de fond attendrait au rang du fond, sans un mot.
+      if (t.rang < jumelle.rang) {
+        jumelle.rang = t.rang;
+        file.liste.splice(file.liste.indexOf(jumelle), 1);
+        placer(file, jumelle);
+      }
+      return { ok: true, fusion: true, tache: jumelle };
+    }
   }
-  if (file.liste.length >= max) return { ok: false, raison: "pleine" };
+  // L'arrêt n'est jamais refusé pour cause de file pleine : c'est le seul geste qui agit sur une
+  // machine qui coule, et 32 lectures en attente ne sont pas une raison de le perdre.
+  if (t.rang !== RANG.URGENT && file.liste.length >= max) return { ok: false, raison: "pleine" };
 
   t.id = `t${++file.seq}`;
   t.creeA = maintenant;
-  let i = file.liste.findIndex((x) => x.rang > t.rang);
+  placer(file, t);
+  return { ok: true, tache: t };
+}
+
+/**
+ * **La tête attend-elle une réponse ?** Un pas `prop` ou `reponse` servi est en vol : le
+ * suspendre ferait servir une autre trame pendant que la sienne est attendue, et sa réponse
+ * tardive pourrait valider le pas de l'intruse. Un pas `fenetre` servi, lui, n'attend RIEN — il
+ * tient la présence — : il reste préemptable, et c'est ce qui permet à « Arrêt » de couper une
+ * préparation dont la fenêtre dure 75 s au lieu d'attendre qu'elle s'écoule.
+ */
+function enVol<M>(t: Tache<M> | undefined): boolean {
+  const p = t?.pas[t.i];
+  return !!p && p.etat === "servi" && p.type !== "fenetre";
+}
+
+/**
+ * Place `t` avant la première tâche de rang strictement plus faible — sauf devant une tête en
+ * vol : la préemption n'a lieu qu'à une frontière de pas. L'intruse attend alors juste derrière,
+ * et `reclasser` lui rend la tête dès que le pas en vol est conclu.
+ */
+function placer<M>(file: FileTaches<M>, t: Tache<M>): void {
+  const debut = enVol(file.liste[0]) ? 1 : 0;
+  let i = file.liste.findIndex((x, k) => k >= debut && x.rang > t.rang);
   if (i < 0) i = file.liste.length;
   file.liste.splice(i, 0, t);
-  return { ok: true, tache: t };
+}
+
+/**
+ * Frontière de pas atteinte : l'ordre par rang redevient la loi. Tri stable, donc FIFO à rang
+ * égal et la tâche suspendue reste devant celles de son rang arrivées après elle.
+ */
+function reclasser<M>(file: FileTaches<M>): void {
+  if (!enVol(file.liste[0])) file.liste.sort((a, b) => a.rang - b.rang);
 }
 
 /**
@@ -322,6 +366,7 @@ export type AServir<M> =
   | { quoi: "rien" };
 
 export function aServir<M>(file: FileTaches<M>, maintenant: number): AServir<M> {
+  reclasser(file);
   const t = courante(file);
   if (!t) return { quoi: "rien" };
   if (t.etat === "attente") {
@@ -345,16 +390,20 @@ export function aServir<M>(file: FileTaches<M>, maintenant: number): AServir<M> 
  * seulement celle de tête : une tâche suspendue par une préemption peut très bien recevoir la
  * réponse qu'elle attendait, et la jeter serait perdre une lecture déjà payée.
  *
- * `quoi.cmd` **restreint** l'appariement aux pas qui portent cette commande ECAM, et n'existe que
- * pour un cas : la réponse à une demande de monitor (`0x75`) n'arrive PAS en `data_response`, elle
+ * `quoi.cmd` **restreint** l'appariement aux pas qui portent cette commande ECAM. Le cas qui l'a fait
+ * naître : la réponse à une demande de monitor (`0x75`) n'arrive PAS en `data_response`, elle
  * arrive en poussée de propriété `d302_monitor` — mesuré, voir `doc/commandes-cafe.md`. Or ces
  * poussées sont aussi **spontanées** : pendant une préparation la machine en émet une toutes les 1
  * à 3 secondes. Les apparier largement validerait le pas d'une tâche qui attend tout autre chose —
  * une lecture de statistiques, par exemple — avec des compteurs jamais lus déclarés lus.
  *
- * Sans `cmd`, le comportement est inchangé : un `data_response` apparie le premier pas `reponse`
- * venu. C'est délibérément conservé, faute d'avoir vérifié la correspondance octet à octet pour
- * toutes les commandes ; restreindre à l'aveugle ferait échouer des lectures qui fonctionnent.
+ * Avec `cmd`, la restriction vaut pour **tout** pas `reponse` (`0xA2`, `0xA3`, `0xA6`…), pas
+ * seulement `0x75` / `0xBA` : un `data_response` porte sa commande à l'octet 2, et la passer ici
+ * est ce qui empêche la réponse tardive d'une tâche suspendue de valider le pas de l'intruse.
+ * `server.ts` le passe désormais sur ses trois chemins (`0x75`, `0xBA`, et `buf[2]` pour tout
+ * `data_response`). Sans `cmd` — les bancs seulement —, le premier pas `reponse` servi est apparié.
+ * ⚠️ Un pas `reponse` créé avec `cmd: null` ne colle donc plus à AUCUNE réponse réelle :
+ * `pasPourTrame` (server.ts) lit toujours la commande dans la trame, ne pas le contourner.
  *
  * @returns la tâche appariée, ou null
  */
@@ -396,6 +445,7 @@ export type EvenementFile<M> =
 
 export function tic<M>(file: FileTaches<M>, maintenant: number): EvenementFile<M>[] {
   const ev: EvenementFile<M>[] = [];
+  reclasser(file);
   const t = courante(file);
   if (!t) return ev;
   /**

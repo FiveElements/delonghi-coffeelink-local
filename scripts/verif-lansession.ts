@@ -253,5 +253,21 @@ test("le charabia s'arrête au premier bloc, pas un octet de plus", () => {
   if (abime.slice(-24) !== sain.slice(-24)) throw new Error("la queue du message doit être lisible mot pour mot");
 });
 
+test("une charge tronquée (pas un multiple de 16) est refusée SANS décaler le flux", () => {
+  // Sans ce refus, `d.update` gardait le bloc incomplet en réserve et le collait devant le message
+  // suivant : tous les messages d'après étaient lus décalés, jusqu'au prochain échange de clés.
+  const { appareil, client } = paire(echange());
+  const msg = JSON.parse(appareil.encapsulate('{"a":1}'));
+  const enc = Buffer.from(msg.enc, "base64");
+  let leve = false;
+  try { client.decapsulate({ enc: enc.subarray(0, enc.length - 3).toString("base64"), sign: msg.sign }); }
+  catch (e) { leve = /multiple de 16/.test(e instanceof Error ? e.message : ""); }
+  if (!leve) throw new Error("charge tronquée acceptée");
+  // Le message tronqué a été sauté : le suivant perd au plus ses 16 premiers octets (refus de
+  // signature), et celui d'après se lit intact — le flux est resté sur une frontière de bloc.
+  try { client.decapsulate(JSON.parse(appareil.encapsulate('{"b":2}'))); } catch { /* 16 octets abîmés : attendu */ }
+  eq(JSON.parse(client.decapsulate(JSON.parse(appareil.encapsulate('{"c":3}')))).data, { c: 3 }, "flux réaligné");
+});
+
 console.log(ko ? `\n${ko} ÉCHEC(S)\n` : "\nTout passe.\n");
 process.exit(ko ? 1 : 0);

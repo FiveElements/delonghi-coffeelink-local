@@ -123,7 +123,8 @@ test("une trame trop courte pour l'écoulement rend null, pas zéro", () => {
   // lire « absent ». Un 0 fabriqué ici verrouillerait l'affinage en annonçant « 0 espresso ».
   // Cinq mots seulement : assez pour le grain (mot 4) et l'écoulement (mot 2), pas pour le
   // compteur (mot 5). Longueur 28 octets, donc `len` = 27 : 6 d'en-tête + 20 de charge + 2 de CRC.
-  const court = b64("d0 1b a1 0f 01 f4 00 00 00 2c 00 00 18 c9 00 00 23 6f 00 00 24 54 00 00 00 03 25 7d");
+  // Le CRC est le vrai (95 1c) : le décodeur le vérifie, une trame fabriquée doit le porter.
+  const court = b64("d0 1b a1 0f 01 f4 00 00 00 2c 00 00 18 c9 00 00 23 6f 00 00 24 54 00 00 00 03 95 1c");
   const r = decodeBeanSync(court);
   eq(r.selected, 3, "grain toujours lu");
   eq(r.espressos, null, "compteur absent");
@@ -166,6 +167,11 @@ test("le numéro de série porte la même commande et doit être refusé", () =>
   // Les deux sont des `0xA1 0x0F`. Sans le contrôle du paramètre, la chaîne « 217055DU… » se
   // relisait en mots de 32 bits et rendait un `selected` fabriqué de toutes pièces.
   leve(() => decodeBeanSync(SERIE), "paramètre 205", "paramètre étranger");
+});
+
+test("une trame corrompue (CRC faux) est refusée au lieu de rendre un grain plausible", () => {
+  const abime = Buffer.from(GRAIN_3, "base64"); abime[21] ^= 1;   // le mot du grain
+  leve(() => decodeBeanSync(abime.toString("base64")), "corrompue", "CRC");
 });
 
 test("une autre commande est refusée", () => {

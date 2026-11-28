@@ -363,5 +363,19 @@ test("une valeur qui ne tient pas dans sa largeur lève", () => {
   eq(encodeRecipeBounds(1, [{ id: 1, min: 0, def: 300, max: 400 }]).bytes.length, 5 + 7 + 2, "300 tient dans une quantité 16 bits");
 });
 
+test("une trame de bornes tronquée ou corrompue est REFUSÉE, pas lue en zéros", () => {
+  // Le décodeur lisait `buf[i]` sans savoir s'il existait : tronquée, des bornes à 0 ; un octet
+  // basculé, des bornes plausibles et fausses. Le CRC tranche — les sept trames réelles le passent.
+  const brut = Buffer.from(TRAMES.espresso, "base64");
+  const refuse = (b: Buffer, motif: RegExp, quoi: string) => {
+    let msg = "";
+    try { decodeRecipeBounds(b.toString("base64")); } catch (e) { msg = e instanceof Error ? e.message : String(e); }
+    vrai(motif.test(msg), `${quoi} : ${msg || "acceptée"}`);
+  };
+  refuse(brut.subarray(0, brut.length - 4), /tronquée/, "tronquée");
+  const abime = Buffer.from(brut); abime[8] ^= 1;
+  refuse(abime, /corrompue/, "un octet basculé");
+});
+
 console.log(ko ? `\n${ko} échec(s).` : "\nTout passe.");
 process.exit(ko ? 1 : 0);

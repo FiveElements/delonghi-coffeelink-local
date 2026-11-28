@@ -413,6 +413,7 @@ export const paramInfo = (id: number): InfoParam => PARAMS[id] ?? { name: String
 // obtient des valeurs plausibles et fausses. Réexportée sous son ancien nom, les deux décodeurs
 // ci-dessous s'en servant sous celui-là.
 import { TWO as TWO_BYTE } from "./ecam-args.ts";
+import { trameEntiere } from "./trame-bornes.ts";
 export { TWO_BYTE };
 
 /**
@@ -439,7 +440,8 @@ export interface ValeursRecette { profileId: number; beverageId: number; cmd: nu
 export function decodeRecipeBounds(b64: string): BornesRecette {
   const buf = Buffer.from(b64, "base64");
   if (buf.length < 7) throw new Error("trame trop courte");
-  const len = buf[1] + 1;
+  // Tronquée ou corrompue : refusée, au lieu de bornes à 0 enregistrées comme lues.
+  const len = trameEntiere(buf, "trame de bornes");
   const end = len - 2; // début du CRC
   const out: BornesRecette = { beverageId: buf[4], cmd: buf[2], params: [], exact: false, hex: buf.subarray(0, len).toString("hex").replace(/(..)/g, "$1 ").trim() };
   let i = 5;
@@ -463,7 +465,7 @@ export function decodeRecipeBounds(b64: string): BornesRecette {
 export function decodeRecipeValues(b64: string): ValeursRecette {
   const buf = Buffer.from(b64, "base64");
   if (buf.length < 8) throw new Error("trame trop courte");
-  const len = buf[1] + 1;
+  const len = trameEntiere(buf, "trame de recette");
   const end = len - 2;
   const out: ValeursRecette = { profileId: buf[4], beverageId: buf[5], cmd: buf[2], params: [], exact: false, hex: buf.subarray(0, len).toString("hex").replace(/(..)/g, "$1 ").trim() };
   let i = 6;

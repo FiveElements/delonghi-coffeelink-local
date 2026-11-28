@@ -35,9 +35,10 @@ export type Mode = (typeof MODE)[keyof typeof MODE];
  *
  * ⚠️ **`PREPARE_INVERSION` vaut 6, donc il déborde sur les bits du profil.** Ce n'est pas une
  * coquille locale : c'est ce que fait l'application (`RecipeData.T()`), et la trame le porte tel
- * quel. La conséquence se voit au décodage — `argumentsTrame` relit `profil << 2` et rend un
- * profil décalé pour toute inversion hors profil 1. On reporte le comportement de l'app plutôt que
- * de le corriger : la machine est le juge, et rien ici ne prouve qu'elle lise ces bits autrement.
+ * quel. La conséquence se voit au décodage : profil 2 et profil 3 donnent le même octet, donc
+ * `argumentsTrame` affiche les deux candidats et `profilVise` rend `null` (`inversionAmbigue`,
+ * `ecam-args.ts`). On reporte le comportement de l'app plutôt que de le corriger : la machine est
+ * le juge, et rien ici ne prouve qu'elle lise ces bits autrement.
  */
 export const ACT = { SAVE: 1, PREPARE: 2, PREPARE_INVERSION: 6 } as const;
 export type Action = (typeof ACT)[keyof typeof ACT];
@@ -83,6 +84,8 @@ export const actionPreparer = (params: readonly ParamValeur[] | null | undefined
  *
  * Rien n'est borné ni corrigé — une valeur qui ne tient pas dans sa largeur est une erreur
  * d'appelant et doit se voir, pas se faire tronquer en silence. Même règle que `encodeRecipeBounds`.
+ * Ça vaut pour **tout** octet posé ici : un `NaN` (saisie vide, `"abc"`) ou un `40.5` passaient
+ * les comparaisons et sortaient en 0 ou tronqués par `& 0xff` — un autre café, sans erreur.
  *
  * @param mode    une valeur de `MODE`
  * @param action  une valeur de `ACT`
@@ -97,6 +100,14 @@ export function encodeDispense(
   check = false,
 ): TrameEncodee {
   const entrees = params ?? [];
+  // `Number.isInteger` refuse aussi NaN et ±Infinity, que `v < 0 || v > max` laissait passer.
+  const octet = (v: number, max: number, quoi: string) => {
+    if (!Number.isInteger(v) || v < 0 || v > max) throw new Error(`${quoi} invalide : ${v} (entier 0..${max} attendu)`);
+  };
+  octet(beverageId, 0xff, "boisson");
+  octet(profile, 0x3f, "profil");   // `profile << 2` doit tenir dans un octet
+  octet(mode, 0x7f, "mode");        // le bit 0x80 est celui de la vérification
+  octet(action, 0x03 | 0x04, "action");
   // 6 octets d'en-tête + 2 ou 3 par entrée + 1 pour (profil << 2) | action + 2 de CRC.
   const taille = 6 + entrees.reduce((n, p) => n + (TWO.has(Number(p.id)) ? 3 : 2), 0) + 3;
   const b = new Uint8Array(taille);
@@ -111,7 +122,8 @@ export function encodeDispense(
     const id = Number(p.id);
     const deux = TWO.has(id);
     const v = Number(p.value ?? 0);
-    if (v < 0 || v > (deux ? 0xffff : 0xff)) throw new Error(`valeur ${v} hors largeur pour le paramètre ${id}`);
+    octet(id, 0xff, "identifiant de paramètre");
+    octet(v, deux ? 0xffff : 0xff, `valeur du paramètre ${id}`);
     b[i++] = id & 0xff;
     if (deux) { b[i++] = (v >> 8) & 0xff; b[i++] = v & 0xff; }
     else b[i++] = v & 0xff;

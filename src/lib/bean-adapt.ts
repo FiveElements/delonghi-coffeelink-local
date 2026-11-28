@@ -89,6 +89,11 @@ export function computeBeanAdapt(
   const flowTime = Number(answers.flowTime);
   const crema = Number(answers.crema);
   const taste = Number(answers.taste);
+  // Hors des trois réponses, `temperatureDelta` / `aromaDelta` rendaient 0 : une réponse
+  // inexistante passait pour « crema foncée » / « goût équilibré ». Refusée, comme `composeGrainNeuf`.
+  for (const [nom, v] of [["crema", crema], ["taste", taste]] as const) {
+    if (v !== 1 && v !== 2 && v !== 3) throw new Error(`${nom} ${JSON.stringify(answers[nom])} invalide : attendu 1, 2 ou 3`);
+  }
   const dg = grinderDelta(flowTime);
   const dt = temperatureDelta(crema);
   const da = aromaDelta(taste, flowTime);
@@ -213,9 +218,12 @@ export function composeGrainNeuf(reponses: { melange?: unknown; torrefaction?: u
   /* Une case manquante est un fichier abîmé, pas une entrée invalide : on le dit autrement. */
   if (!releve) throw new Error(`bean-creation.json : case ${cle} absente du relevé (relancer scripts/extract-bean-creation.ts)`);
 
-  const grinder = clamp(releve.grinder, GRINDER_MIN, GRINDER_MAX);
-  const temperature = clamp(releve.temperature, TEMPERATURE_MIN, TEMPERATURE_MAX);
-  const aroma = clamp(releve.aroma, AROMA_MIN, AROMA_MAX);
+  /* Une case hors bornes est un relevé qui a changé, pas une valeur à rogner : la ramener en
+     silence dans les bornes afficherait un réglage que De'Longhi n'a jamais rendu. */
+  const { grinder, temperature, aroma } = releve;
+  for (const [nom, v, lo, hi] of [["grinder", grinder, GRINDER_MIN, GRINDER_MAX], ["temperature", temperature, TEMPERATURE_MIN, TEMPERATURE_MAX], ["aroma", aroma, AROMA_MIN, AROMA_MAX]] as const) {
+    if (!Number.isInteger(v) || v < lo || v > hi) throw new Error(`bean-creation.json : case ${cle}, ${nom} = ${v} hors de [${lo}, ${hi}] (relevé à revoir, pas à rogner)`);
+  }
 
   /**
    * Une note par réglage, toujours — et **préfixées `neuf`**.
@@ -295,7 +303,11 @@ export function affinagePermis(espressos: number | null | undefined, gen: string
  */
 export function encodeBeanName(name: unknown): Buffer {
   const out = Buffer.alloc(40);
-  const chars = String(name ?? "").slice(0, 20);
+  let chars = String(name ?? "").slice(0, 20);
+  // Ne jamais couper une paire de substitution : une moitié haute seule part en octets invalides
+  // (un « ? » sur la machine), au lieu d'un caractère de moins.
+  const der = chars.charCodeAt(chars.length - 1);
+  if (der >= 0xd800 && der <= 0xdbff) chars = chars.slice(0, -1);
   for (let i = 0; i < chars.length; i++) {
     const c = chars.charCodeAt(i);
     out[i * 2] = (c >> 8) & 0xff;

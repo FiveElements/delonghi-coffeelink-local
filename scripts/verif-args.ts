@@ -195,6 +195,17 @@ test("profilVise lit les DEUX dispositions, et rien d'autre", () => {
   eq(profilVise(sortante(frameTurnOn())), null, "une trame qui ne vise aucun profil");
 });
 
+test("0x83 inversé : profil illisible, jamais un profil voisin", () => {
+  // PREPARE_INVERSION vaut 6 : son bit 0x04 écrase le bit bas du profil, donc profil 2 se relisait 3.
+  const inv = (prof: number) => frameDispense(7, prof, 1, 6, [{ id: 12, value: 1 }]);
+  eq(profilVise(sortante(inv(2))), null, "profil 2 inversé : null, pas 3");
+  eq(profilVise(sortante(inv(3))), null, "même octet pour profil 3 : null aussi");
+  eq(lire(inv(2)), "préparer Cappuccino · profil 2 ou 3 (inversion) · Inversion 1", "les deux candidats affichés");
+  // Le bit 0x04 seul ne suffit pas : tout profil impair le lève, sans inversion.
+  eq(profilVise(sortante(frameDispense(1, 3, 1, 2, [{ id: 1, value: 30 }]))), 3, "profil impair non inversé : lu");
+  eq(profilVise(sortante(frameDispense(7, 2, 1, 2, [{ id: 12, value: 1 }]))), 2, "INVERSION=1 mais action 2 : octet non ambigu");
+});
+
 console.log("\n— les trames ENTRANTES : ce que la machine répond, ce qu'une app reçoit —");
 
 // Une réponse ne porte PAS les 4 octets d'horodatage : c'est nous qui les ajoutons.

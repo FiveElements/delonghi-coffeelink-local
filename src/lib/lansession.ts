@@ -155,7 +155,12 @@ export function makeLanSession({ lanKey, random1, random2, time1, time2, role }:
      * conserve.
      */
     decapsulate(body) {
-      const p = d.update(Buffer.from(body.enc, "base64"));
+      const brut = Buffer.from(String(body.enc ?? ""), "base64");
+      // Refusé AVANT `d.update` : sans remplissage automatique, le déchiffreur garde un bloc
+      // incomplet en réserve et le colle devant le message suivant — tout le flux serait décalé
+      // pour de bon, là où un message sauté n'abîme que 16 octets. Rien n'est consommé ici.
+      if (brut.length === 0 || brut.length % 16 !== 0) throw new Error(`charge chiffrée de ${brut.length} octets : pas un multiple de 16, refusée sans toucher au flux`);
+      const p = d.update(brut);
       let end = p.length;
       while (end > 0 && p[end - 1] === 0) end--;
       const clair = p.subarray(0, end);

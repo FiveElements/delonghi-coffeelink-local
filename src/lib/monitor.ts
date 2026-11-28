@@ -9,6 +9,7 @@
  * ⚠️ Ce module N'EST PAS une des copies fantômes de `src/lib/*.ts` : il tourne, `server.ts`
  * l'importe.
  */
+import { trameEntiere } from "./trame-bornes.ts";
 
 /**
  * Alarmes du monitor — index de bit → identifiant, port de `p127m6/l` (méthode `a(int)`).
@@ -201,15 +202,17 @@ export function decodeMonitor(b64: string): Monitor {
   // `toString(16)` du journal levait une TypeError : les autres propriétés du MÊME datapoint
   // étaient perdues, et le journal accusait à tort le déchiffrement.
   if (raw.length < 9) throw new Error(`trame monitor trop courte (${raw.length} octets)`);
-  const n = raw[1] + 1;
+  const n = trameEntiere(raw, "trame monitor");
   const e = raw.subarray(0, n);
-  if (e.length < 9) throw new Error(`trame monitor tronquée (len annoncé ${n}, ${e.length} reçus)`);
+  // Le CRC occupe les deux derniers octets : rien de ce qui suit ne doit le lire comme une donnée.
+  const fin = n - 2;
+  if (fin < 9) throw new Error(`trame monitor sans alarmes (len annoncé ${n})`);
   const bits = e[5] + (e[6] << 8);
   const switches = MONITOR_SWITCHES.filter((sw) => (e[5 + sw.group] >> sw.bit) & 1);
   // Octet 13 multiplié, pas décalé : `0x80 << 24` vaut −2147483648 en JS, et l'API publiait alors
   // un champ de bits négatif. La boucle sur les bits utilise déjà `>>>`, seule la valeur exposée
   // était fausse.
-  const alarmBits = e[7] + (e[8] << 8) + ((e[12] ?? 0) << 16) + (e[13] ?? 0) * 0x1000000;
+  const alarmBits = e[7] + (e[8] << 8) + ((fin > 12 ? e[12] : 0) << 16) + (fin > 13 ? e[13] : 0) * 0x1000000;
   const alarms: AlarmeMonitor[] = [];
   for (let i = 0; i < 32; i++) {
     if (!((alarmBits >>> i) & 1)) continue;
@@ -219,9 +222,9 @@ export function decodeMonitor(b64: string): Monitor {
   }
   // Progression : lue défensivement, car le contrôle de longueur ci-dessus n'exige que 9 octets
   // (l'état et les alarmes). Une trame plus courte perd la progression, pas le reste.
-  const fonction = e.length > 9 ? e[9] : null;
-  const etape = e.length > 10 ? e[10] : null;
-  const pourcent = e.length > 11 ? e[11] : null;
+  const fonction = fin > 9 ? e[9] : null;
+  const etape = fin > 10 ? e[10] : null;
+  const pourcent = fin > 11 ? e[11] : null;
   /**
    * **Trois états, pas deux** : au repos, en préparation, ou on ne sait pas. `null` quand la
    * trame est trop courte pour porter la progression — l'interface teste `=== false` pour

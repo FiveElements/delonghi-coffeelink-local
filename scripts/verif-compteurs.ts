@@ -127,8 +127,10 @@ test("l'eau se divise par 2000, pas par 1000", () => {
   eq(info?.divisor, 2000, "diviseur de d553");
   eq(info?.unit, "L", "unité de d553");
   // 387 213 demi-millilitres = 193,6 L. Home Assistant en annonce 387,2 : c'est le double.
-  eq(valeurAffichee("d553_water_tot_qty", 387213), 194, "387213 demi-ml → litres");
-  vrai(valeurAffichee("d553_water_tot_qty", 387213) !== 387, "ce n'est PAS la valeur /1000 de HA");
+  eq(valeurAffichee("d553_water_tot_qty", 387213), 193.6, "387213 demi-ml → litres, au dixième");
+  vrai(valeurAffichee("d553_water_tot_qty", 387213) !== 387.2, "ce n'est PAS la valeur /1000 de HA");
+  // Arrondir à l'entier effaçait jusqu'à 0,5 L : 999 demi-ml (≈ 0,5 L) s'affichaient 0.
+  eq(valeurAffichee("d553_water_tot_qty", 999), 0.5, "un demi-litre ne disparaît plus");
 });
 
 test("les volumes d'unité non établie sortent bruts", () => {

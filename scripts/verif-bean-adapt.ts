@@ -32,6 +32,7 @@ import { readFile } from "node:fs/promises";
 import {
   computeBeanAdapt,
   composeGrainNeuf,
+  encodeBeanName,
   GRINDER_MIN, GRINDER_MAX,
   AROMA_MIN, AROMA_MAX,
   TEMPERATURE_MIN, TEMPERATURE_MAX,
@@ -338,6 +339,31 @@ test("chaque note du grain neuf a son texte dans messages/fr.json", () => {
   for (const c of COMBINAISONS) for (const n of composeGrainNeuf(c).notes) vues.add(n);
   vrai(vues.size > 0, "aucune note produite — le balayage ne couvre rien");
   for (const n of vues) vrai(`note_${n}` in MESSAGES, `note_${n} manque dans messages/fr.json`);
+});
+
+console.log("\n— affinage : une réponse inexistante est REFUSÉE —");
+
+test("crema ou goût hors de {1, 2, 3} lève au lieu de valoir « rien à changer »", () => {
+  // Avant : crema 0 ou 7, ou un NaN, tombait dans la branche « 0 » des deltas — une réponse que
+  // personne n'a donnée passait pour « crema foncée » / « goût équilibré ».
+  leve(() => computeBeanAdapt(BASE, { flowTime: 15, crema: 0, taste: 2 }), "crema", "crema 0");
+  leve(() => computeBeanAdapt(BASE, { flowTime: 15, crema: 2, taste: 4 }), "taste", "goût 4");
+  leve(() => computeBeanAdapt(BASE, { flowTime: 15, crema: undefined, taste: 2 }), "crema", "crema absente");
+  leve(() => computeBeanAdapt(BASE, { flowTime: 15, crema: 2, taste: 1.5 }), "taste", "goût 1.5");
+  eq(computeBeanAdapt(BASE, { flowTime: 15, crema: "2", taste: "2" }).changed, false, "« 2 » en chaîne reste accepté (corps JSON)");
+});
+
+console.log("\n— nom de grain : jamais une demi-paire de substitution —");
+
+test("un emoji à cheval sur le 20e caractère est retiré entier, pas coupé", () => {
+  // 19 lettres puis un emoji (2 unités UTF-16) : slice(0, 20) gardait la moitié haute seule.
+  const nom = "A".repeat(19) + String.fromCodePoint(0x1f600);
+  const b = encodeBeanName(nom);
+  eq([b[38], b[39]], [0, 0], "20e unité vide, pas une moitié haute");
+  eq([b[36], b[37]], [0, 0x41], "19e lettre intacte");
+  // Un emoji qui tient entier reste entier.
+  const b2 = encodeBeanName("A".repeat(18) + String.fromCodePoint(0x1f600));
+  eq([b2[36], b2[37], b2[38], b2[39]], [0xd8, 0x3d, 0xde, 0x00], "paire complète conservée");
 });
 
 console.log("\n— grain neuf : les identifiants sont ceux du questionnaire De'Longhi —");

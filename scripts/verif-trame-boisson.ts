@@ -96,6 +96,19 @@ test("une valeur hors largeur LÈVE, elle ne se tronque pas", () => {
   vrai(leve, "256 sur un octet est passé en silence");
 });
 
+test("valeur non entière, NaN, id ou profil hors octet : tout LÈVE", () => {
+  const leve = (fn: () => unknown, quoi: string) => { let l = false; try { fn(); } catch { l = true; } vrai(l, `${quoi} est passé en silence`); };
+  leve(() => encodeDispense(7, 1, MODE.START, ACT.PREPARE, [{ id: 1, value: 40.5 }]), "40.5");
+  leve(() => encodeDispense(7, 1, MODE.START, ACT.PREPARE, [{ id: 1, value: "abc" }]), "NaN");
+  leve(() => encodeDispense(7, 1, MODE.START, ACT.PREPARE, [{ id: 300, value: 1 }]), "id 300");
+  leve(() => encodeDispense(7, 1, MODE.START, ACT.PREPARE, [{ id: "x", value: 1 }]), "id NaN");
+  leve(() => encodeDispense(256, 1, MODE.START, ACT.PREPARE, []), "boisson 256");
+  leve(() => encodeDispense(7, 64, MODE.START, ACT.PREPARE, []), "profil 64 (64 << 2 déborde)");
+  leve(() => encodeDispense(7, 1.5, MODE.START, ACT.PREPARE, []), "profil 1.5");
+  // Les saisies légitimes restent acceptées : chaîne numérique entière, valeur absente.
+  eq(buf(encodeDispense(7, 1, MODE.START, ACT.PREPARE, [{ id: "2", value: "3" }, { id: 0 }]))[7], 3, "\"3\" accepté");
+});
+
 test("l'ordre des paramètres est CELUI DE L'APPELANT, jamais trié", () => {
   const b = buf(encodeDispense(7, 1, MODE.START, ACT.PREPARE, [{ id: 12, value: 1 }, { id: 1, value: 40 }]));
   eq(b[6], 12, "premier id");
@@ -134,6 +147,11 @@ test("l'inversion déborde sur les bits du profil — fait reporté de l'app, pa
   const b = buf(encodeDispense(7, 2, MODE.START, ACT.PREPARE_INVERSION, CAPPU));
   eq(b[b.length - 3], (2 << 2) | 6, "octet profil/action brut");
   vrai(argumentsTrame(b, NOMS)?.includes("profil 3"), "le décodeur ne relit plus profil 3 ici");
+});
+
+test("une inversion que l'encodeur produit vraiment (paramètre 12 = 1) : profil dit ambigu", () => {
+  const b = buf(encodeDispense(7, 2, MODE.START, ACT.PREPARE_INVERSION, [...CAPPU, { id: 12, value: 1 }]));
+  vrai(argumentsTrame(b, NOMS)?.includes("profil 2 ou 3 (inversion)"), `profil affiché faux : ${argumentsTrame(b, NOMS)}`);
 });
 
 console.log("CRC");
