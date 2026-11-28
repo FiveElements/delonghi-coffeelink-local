@@ -194,12 +194,15 @@ export default function Beans() {
   // La règle « quand relire » vit dans `useMachinePush` : trois pages la partagent.
   const { live, busy: pending } = useMachinePush(refresh);
 
-  // Repli : si le flux n'a pas pu s'établir, on retombe sur une scrutation — mais seulement
-  // pendant qu'un balayage tourne, et en le disant.
+  // Repli : si le flux n'a pas pu s'établir, on retombe sur une scrutation, et on le dit
+  // (`pushOff`). Pas seulement pendant un balayage : une écriture 0xBB n'en est pas un, et sans
+  // flux `useMachinePush` ne voit jamais sa fin — la page restait sur l'ancien réglage. Même règle
+  // que l'accueil et `/pilotage` : en repli, on relit toujours, plus vite pendant l'activité. Le
+  // `GET` ne met rien dans la file de la machine.
   const scanning = !!data?.scan;
   useEffect(() => {
-    if (live || !scanning) return;
-    const id = setInterval(refresh, 3000);
+    if (live) return;
+    const id = setInterval(refresh, scanning ? 3000 : 5000);
     return () => clearInterval(id);
   }, [live, scanning, refresh]);
 

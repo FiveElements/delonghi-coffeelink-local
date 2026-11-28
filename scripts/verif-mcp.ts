@@ -96,6 +96,7 @@ console.log(`OK: ${OUTILS_ATTENDUS.length} outils MCP attendus présents dans se
  * fabriquée à la main ici, ce serait vérifier le test.
  */
 import { spawn } from "node:child_process";
+import { request } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -222,6 +223,19 @@ srv.on("exit", (code) => { codeServeur = code; });
 
 try {
   if (!(await attendre())) throw new Error(`le serveur de test ne répond pas sur ${BASE}`);
+
+  // 0. Un corps annoncé trop gros reçoit 413 AVANT toute précondition — ici le 404 d'une machine
+  //    inconnue, qui passait devant (comme le 409 « machine non configurée »). Hors MCP, mais c'est
+  //    le seul banc qui fait tourner un vrai `server.ts`. Seuls les en-têtes partent : le serveur
+  //    doit trancher sur le Content-Length, sans attendre un octet de corps.
+  const statutGros = await new Promise<number | undefined>((resolve, reject) => {
+    const rq = request(`${BASE}/api/command?machine=inexistante`, {
+      method: "POST", headers: { "Content-Type": "application/json", "Content-Length": String(70 * 1024) },
+    }, (r) => { resolve(r.statusCode); r.resume(); rq.destroy(); });
+    rq.on("error", reject);
+    rq.flushHeaders();
+  });
+  if (statutGros !== 413) throw new Error(`attendu 413 pour un corps annoncé de 70 Kio, obtenu ${statutGros}`);
 
   // 1. Sans jeton → 401, jamais un protocole qui répond quand même.
   const sansJeton = await appelMcp(null, "tools/list");

@@ -269,5 +269,42 @@ test("une charge tronquée (pas un multiple de 16) est refusée SANS décaler le
   eq(JSON.parse(client.decapsulate(JSON.parse(appareil.encapsulate('{"c":3}')))).data, { c: 3 }, "flux réaligné");
 });
 
+console.log("\n— un message chiffré capturé ne se rejoue pas —");
+
+test("rejouer deux messages capturés : le second passerait la signature, son seq_no le trahit", () => {
+  // L'attaque que le flux CBC persistant ne bloque PAS seul. Rejouer un message isolé échoue : son
+  // premier bloc se déchiffre contre le chaînage COURANT, donc la signature ne colle plus. Mais
+  // `decapsulate` consomme un message refusé (voulu, voir lansession.ts) : rejouer d'abord le
+  // message k-1 — refusé, mais il remet le chaînage sur son dernier bloc — puis le message k, et
+  // celui-ci se déchiffre à l'octet près, signature valide. Seul le seq_no le distingue.
+  const { appareil, client } = paire(echange());
+  const capture = [0, 1, 2].map((i) => appareil.encapsulate(JSON.stringify({ n: i })));
+  for (const c of capture) client.decapsulate(JSON.parse(c));
+  try { client.decapsulate(JSON.parse(capture[0])); } catch { /* chaînage faux : refusé, attendu */ }
+  let message = "";
+  try { client.decapsulate(JSON.parse(capture[1])); } catch (e) { message = e instanceof Error ? e.message : String(e); }
+  if (!/rejeu/.test(message)) throw new Error(`message rejoué accepté (${message || "aucun refus"})`);
+});
+
+test("le refus d'un rejeu garde le clair, comme celui d'une signature", () => {
+  const { appareil, client } = paire(echange());
+  const capture = [0, 1].map((i) => appareil.encapsulate(JSON.stringify({ n: i })));
+  for (const c of capture) client.decapsulate(JSON.parse(c));
+  try { client.decapsulate(JSON.parse(capture[0])); } catch { /* attendu */ }
+  let clair: unknown;
+  try { client.decapsulate(JSON.parse(capture[1])); } catch (e) { clair = e instanceof Error && "clair" in e ? e.clair : undefined; }
+  eq(clair, '{"seq_no":1,"data":{"n":1}}', "clair conservé");
+});
+
+test("un nouvel échange de clés repart de zéro : seq_no 0 est de nouveau accepté", () => {
+  // La mémoire des seq_no vit dans la session, donc meurt avec elle — c'est voulu : les deux bouts
+  // remettent leur compteur à 0 à chaque échange de clés (`let seq = 0` dans `makeLanSession`).
+  const kx = echange();
+  for (let tour = 0; tour < 2; tour++) {
+    const { appareil, client } = paire({ ...kx, random2: token(16) });
+    eq(JSON.parse(client.decapsulate(JSON.parse(appareil.encapsulate("{}")))).seq_no, 0, `session #${tour}`);
+  }
+});
+
 console.log(ko ? `\n${ko} ÉCHEC(S)\n` : "\nTout passe.\n");
 process.exit(ko ? 1 : 0);

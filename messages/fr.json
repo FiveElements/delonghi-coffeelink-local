@@ -473,6 +473,7 @@
     "rank2": "lecture",
     "rank3": "lecture différée",
     "state_faite": "terminée",
+    "state_interrompue": "interrompue",
     "state_echouee": "échouée",
     "state_annulee": "annulée",
     "taskCancel": "Annuler",

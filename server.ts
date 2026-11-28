@@ -54,7 +54,7 @@ import { nouveauRegistre, annoncer, etablir, oublier, expirer, toucher, refuser,
 import type { IntentionApp, ReponseJson } from "./src/lib/appproxy.ts";
 import { httpJson, echangeClesVersApp, analyserCommandes, paquetDatapoint, paquetAck,
          estRefus, porteUneCharge, encoreDesCommandes, CHEMIN_ACK, cheminAvecCmd,
-         PORT_ATTENDU_PAR_APP } from "./src/lib/appproxy.ts";
+         PORT_ATTENDU_PAR_APP, champ } from "./src/lib/appproxy.ts";
 // Persistance : SQLite (`data/lan-server.db`). Le module migre tout seul les anciens JSON au
 // premier démarrage. Chaque propriété reçue est UNE ligne réécrite, plus 80 ko de cache entier.
 import type { FileTaches, I18nTache, Pas, Rang, Tache } from "./src/lib/tasks.ts";
@@ -349,7 +349,25 @@ const ENV_MACHINE = {
   // saurait pas si elle a le droit de s'appliquer.
   genForced: !!process.env.MACHINE_GENERATION,
 };
-const DEVICE_SHEET = JSON.parse(readFileSync(new URL("./src/lib/device-sheet.json", import.meta.url), "utf8"));
+/**
+ * Un JSON figé du dépôt, lu au démarrage. `unknown` et non le `any` de `JSON.parse` : un fichier
+ * abîmé (fusion ratée, édition à la main) doit arrêter le démarrage en NOMMANT le fichier et le
+ * champ, pas laisser un `undefined` filer jusqu'à la première requête cloud. (`errMsg` est déclaré
+ * plus bas : pas utilisable ici, on est encore dans sa zone morte.)
+ */
+function lireJsonFige(chemin: string): unknown {
+  const texte = readFileSync(new URL(chemin, import.meta.url), "utf8");
+  try { return JSON.parse(texte); } catch (e) { throw new Error(`${chemin} : JSON illisible (${e instanceof Error ? e.message : String(e)})`, { cause: e }); }
+}
+/** Un champ textuel d'un JSON figé, par chemin pointé (`ayla.appId`) — ou un refus de démarrer. */
+function texteFige(racine: unknown, fichier: string, chemin: string): string {
+  const v = chemin.split(".").reduce<unknown>((o, k) => champ(o, k), racine);
+  if (typeof v !== "string") throw new Error(`${fichier} : champ « ${chemin} » absent ou non textuel`);
+  return v;
+}
+/** Renvoyée telle quelle par `/api/system` : seule sa nature d'objet est exigée ici. */
+const DEVICE_SHEET = lireJsonFige("./src/lib/device-sheet.json");
+if (typeof DEVICE_SHEET !== "object" || DEVICE_SHEET === null) throw new Error("./src/lib/device-sheet.json : un objet JSON est attendu");
 /**
  * Constantes statiques de l'APK servant a la decouverte de la cle LAN.
  *
@@ -362,15 +380,16 @@ const DEVICE_SHEET = JSON.parse(readFileSync(new URL("./src/lib/device-sheet.jso
  * Chaque valeur reste surchargeable par sa variable d'environnement — compte hors zone
  * europeenne, ou rotation cote De'Longhi.
  */
-const CLOUD_APP = JSON.parse(readFileSync(new URL("./src/lib/cloud-app.json", import.meta.url), "utf8"));
+const CLOUD_APP = lireJsonFige("./src/lib/cloud-app.json");
+const cloudApp = (chemin: string) => texteFige(CLOUD_APP, "./src/lib/cloud-app.json", chemin);
 const APP = {
-  gigyaApiKey: process.env.GIGYA_API_KEY || CLOUD_APP.gigya.apiKey,
-  gigyaDatacenter: process.env.GIGYA_DATACENTER || CLOUD_APP.gigya.datacenter,
-  aylaAppId: process.env.AYLA_APP_ID || CLOUD_APP.ayla.appId,
-  aylaAppSecret: process.env.AYLA_APP_SECRET || CLOUD_APP.ayla.appSecret,
-  aylaUserUrl: CLOUD_APP.ayla.userServiceUrl,
-  aylaDeviceUrl: CLOUD_APP.ayla.deviceServiceUrl,
-  aylaRefreshPath: process.env.AYLA_REFRESH_PATH || CLOUD_APP.ayla.refreshPath,
+  gigyaApiKey: process.env.GIGYA_API_KEY || cloudApp("gigya.apiKey"),
+  gigyaDatacenter: process.env.GIGYA_DATACENTER || cloudApp("gigya.datacenter"),
+  aylaAppId: process.env.AYLA_APP_ID || cloudApp("ayla.appId"),
+  aylaAppSecret: process.env.AYLA_APP_SECRET || cloudApp("ayla.appSecret"),
+  aylaUserUrl: cloudApp("ayla.userServiceUrl"),
+  aylaDeviceUrl: cloudApp("ayla.deviceServiceUrl"),
+  aylaRefreshPath: process.env.AYLA_REFRESH_PATH || cloudApp("ayla.refreshPath"),
 };
 const now = () => new Date().toISOString().slice(11, 23);
 /** Le message d'une exception attrapée : `catch` rend un `unknown`, rien n'y garantit une `Error`. */
@@ -1595,16 +1614,21 @@ const CORPS_MAX_IMAGE = Math.ceil(IMAGE_TAILLE_MAX * 1.4);
 /** Requêtes dont le corps a été refusé : leur connexion est coupée une fois le 413 parti (voir `createServer`). */
 const CORPS_REFUSES = new WeakSet<IncomingMessage>();
 
+/**
+ * Le refus d'un corps trop gros, à lever. On cesse de lire : le reste du corps n'est jamais
+ * accumulé. Le 413 part par l'appelant, et la connexion est détruite juste après (`req.destroy()`
+ * sur `finish`) plutôt que vidée.
+ */
+function corpsTropGros(req: IncomingMessage, max: number) {
+  CORPS_REFUSES.add(req);
+  req.removeAllListeners("data");
+  req.pause();
+  return new ErreurRequete(413, `corps de requête trop volumineux (plafond ${max} octets)`);
+}
+
 function readBody(req: IncomingMessage, max = CORPS_MAX) {
   return new Promise<Buffer>((resolve, reject) => {
-    const refuser = () => {
-      // On cesse de lire : le reste du corps n'est jamais accumulé. Le 413 part par l'appelant, et la
-      // connexion est détruite juste après (`req.destroy()` sur `finish`) plutôt que vidée.
-      CORPS_REFUSES.add(req);
-      req.removeAllListeners("data");
-      req.pause();
-      reject(new ErreurRequete(413, `corps de requête trop volumineux (plafond ${max} octets)`));
-    };
+    const refuser = () => reject(corpsTropGros(req, max));
     if (Number(req.headers["content-length"]) > max) return refuser();
     const c: Buffer[] = [];
     let total = 0;
@@ -1625,12 +1649,20 @@ async function handleLan(req: IncomingMessage, res: ServerResponse) {
   const body = await readBody(req);
   if (url === "/local_lan/key_exchange.json" && req.method === "POST") {
     const brut = body.toString("utf8").match(/"time_1"\s*:\s*"?(-?\d+)"?/);
-    // Un corps illisible ou sans `key_exchange` est un refus (400), pas une panne du serveur (500).
-    let kx;
-    try { kx = JSON.parse(body.toString("utf8")).key_exchange; } catch { kx = null; }
-    if (!kx || typeof kx !== "object") return raw(res, JSON.stringify({ error: "key_exchange illisible" }), 400);
-    kx.time_1 = brut ? brut[1] : String(kx.time_1);
-    if (kx.proto !== 1 || kx.ver !== 1) return raw(res, JSON.stringify({ error: "ver" }), 426);
+    // Un corps illisible, sans `key_exchange` ou sans `random_1` textuel est un refus (400), pas une
+    // panne du serveur (500) : `unknown` puis rétréci, car un `random_1` absent finissait en
+    // exception dans `Buffer.from` de la dérivation.
+    let corps: unknown;
+    try { corps = JSON.parse(body.toString("utf8")); } catch { corps = null; }
+    const echange = champ(corps, "key_exchange");
+    const random1 = champ(echange, "random_1");
+    if (typeof random1 !== "string") return raw(res, JSON.stringify({ error: "key_exchange illisible" }), 400);
+    const kx = {
+      random_1: random1,
+      time_1: brut ? brut[1] : String(champ(echange, "time_1")),
+      key_id: champ(echange, "key_id"),
+    };
+    if (champ(echange, "proto") !== 1 || champ(echange, "ver") !== 1) return raw(res, JSON.stringify({ error: "ver" }), 426);
     // L'adresse d'abord, le `key_id` en second : c'est le seul endroit où le protocole nous donne
     // une deuxième chance de reconnaître l'appelant, et une machine derrière un NAT ou tout juste
     // renumérotée n'est identifiable que par sa clé.
@@ -2554,26 +2586,37 @@ async function handleAppReg(req: IncomingMessage, res: ServerResponse) {
   }
   if (req.method !== "POST" && req.method !== "PUT") return raw(res, JSON.stringify({ error: "method" }), 405);
 
-  let reg;
+  // `unknown` puis rétréci champ par champ : ce corps vient de n'importe qui sur le réseau, et un
+  // `port` objet ou un `uri` numérique filaient jusque dans le registre et les URL de sonde.
+  let corps: unknown;
   try {
-    reg = JSON.parse(body.toString("utf8")).local_reg;
+    corps = JSON.parse(body.toString("utf8"));
   } catch {
     refuser(PROXY.registre, { from, motif: "corpsIllisible" }, Date.now());
     return raw(res, JSON.stringify({ error: "body" }), 400);
   }
-  if (!reg?.port) {
+  const lu = champ(corps, "local_reg");
+  const port = champ(lu, "port");
+  const uri = champ(lu, "uri");
+  if ((typeof port !== "number" && typeof port !== "string") || !port) {
     refuser(PROXY.registre, { from, motif: "corpsIllisible", detail: "port absent" }, Date.now());
     return raw(res, JSON.stringify({ error: "body" }), 400);
   }
+  if (uri != null && typeof uri !== "string") {
+    refuser(PROXY.registre, { from, motif: "corpsIllisible", detail: "uri non textuel" }, Date.now());
+    return raw(res, JSON.stringify({ error: "body" }), 400);
+  }
+  const reg = { ip: champ(lu, "ip"), port, uri, notify: champ(lu, "notify") };
 
   // L'adresse annoncée doit être CELLE de l'appelant : c'est là que nous irons ouvrir une session et
-  // sonder. Sans ce contrôle, n'importe qui nous faisait frapper l'hôte de son choix.
+  // sonder. Sans ce contrôle, n'importe qui nous faisait frapper l'hôte de son choix. Passé ce
+  // point, l'adresse retenue est donc toujours `from`.
   if (reg.ip != null && String(reg.ip) !== from) {
     refuser(PROXY.registre, { from, motif: "ipUsurpee", detail: String(reg.ip).slice(0, 64) }, Date.now());
     return raw(res, JSON.stringify({ error: "ip" }), 400);
   }
   const dsn = new URL(req.url ?? "", "http://x").searchParams.get("dsn");
-  const existante = PROXY.registre.apps.get(cleApp(reg.ip ?? from, reg.port));
+  const existante = PROXY.registre.apps.get(cleApp(from, reg.port));
   // Une adresse a droit à quelques entrées (plusieurs applications sur un téléphone, les `faux-app`
   // de la démonstration), pas à une par port : chaque entrée arme une sonde toutes les 2 s.
   if (!existante && [...PROXY.registre.apps.values()].filter((a) => a.ip === from).length >= MAX_APPS_PAR_IP) {
@@ -2596,7 +2639,7 @@ async function handleAppReg(req: IncomingMessage, res: ServerResponse) {
 
   const { app, nouvelle } = annoncer(
     PROXY.registre,
-    { ip: reg.ip ?? from, port: reg.port, uri: reg.uri ?? "/local_lan", notify: reg.notify, keyId: m.lanKeyId },
+    { ip: from, port: reg.port, uri: reg.uri ?? "/local_lan", notify: reg.notify, keyId: m.lanKeyId },
     Date.now(),
   );
   app.machineId = m.id;
@@ -4919,6 +4962,9 @@ function avancerFiles() {
       } else if (e.type === "faite") {
         L("sys", "tâche", `${e.tache.id} « ${e.tache.label} » terminée : ${e.tache.faits} pas`, m);
         finDeTache(m, e.tache);
+      } else if (e.type === "interrompue") {
+        L("sys", "tâche", `${e.tache.id} « ${e.tache.label} » interrompue : ${e.tache.motif}`, m);
+        finDeTache(m, e.tache);
       } else if (e.type === "echouee") {
         L("sys", "tâche", `${e.tache.id} « ${e.tache.label} » échouée : ${e.tache.motif}`, m);
         finDeTache(m, e.tache);
@@ -6102,8 +6148,21 @@ async function writeSettings(m: Machine, b: { cle?: unknown; value?: unknown; on
 }
 
 // --- API de contrôle ---
+/** Les deux routes dont le corps peut porter une photo (`CORPS_MAX_IMAGE`) ; les autres plafonnent à `CORPS_MAX`. */
+const ROUTES_IMAGE = new Set(["/api/beanpresets", "/api/beans/visual"]);
+
 async function handleApi(req: IncomingMessage, res: ServerResponse) {
   const url = (req.url ?? "").split("?")[0];
+  // **Le plafond annoncé passe AVANT toute précondition.** `readBody` le vérifiait déjà, mais
+  // seulement quand une route lisait son corps — et les routes de `NEEDS_MACHINE` répondent 409
+  // (ou `pickMachine` 404) sans le lire : un corps de plusieurs Mio recevait « machine non
+  // configurée » au lieu de 413. Le Content-Length suffit à trancher ici ; un corps sans longueur
+  // annoncée (chunked) reste plafonné par `readBody` à la lecture, et un refus qui ne le lit pas
+  // ne coûte rien.
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const max = ROUTES_IMAGE.has(url) ? CORPS_MAX_IMAGE : CORPS_MAX;
+    if (Number(req.headers["content-length"]) > max) throw corpsTropGros(req, max);
+  }
   // La gestion des machines elle-même n'est pas rattachée à une machine : elle en crée, en
   // renomme, en supprime. Traitée avant toute résolution, sinon un identifiant supprimé
   // empêcherait de réparer la situation.

@@ -184,7 +184,7 @@ export async function echangeClesVersApp({ ip, port, uri, keyId, random1, time1,
 }
 
 /** Un champ d'un JSON reçu, sans présumer de sa forme : `undefined` dès que ce n'est pas un objet. */
-function champ(o: unknown, cle: string): unknown {
+export function champ(o: unknown, cle: string): unknown {
   return o !== null && typeof o === "object" ? (o as Record<string, unknown>)[cle] : undefined;
 }
 

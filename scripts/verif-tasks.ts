@@ -172,7 +172,9 @@ test("ARRÊT pendant la fenêtre d'une préparation : servi à la visite suivant
   eq(s.quoi === "pas" ? s.pas.nom : s.quoi, "Arrêt", "l'arrêt part à la visite suivante");
   const suite = visites(f, 7000, 120000);
   eq(suite, [], "rien ne repart ensuite — surtout pas la boisson");
-  eq(prep.etat, "faite", "la préparation se conclut sans relancer");
+  // Livrée ne veut pas dire aboutie : la boisson a été coupée, le verdict doit le dire.
+  eq(prep.etat, "interrompue", "la préparation se conclut sans relancer, notée interrompue — pas « faite »");
+  eq(prep.motif, "fenêtre coupée par « Arrêt »", "le motif nomme l'arrêt");
   eq(f.liste.length, 0, "file vide : la fenêtre restante n'a pas bloqué la file");
 });
 test("une fenêtre préemptée ne réémet pas sa trame : la tâche reprend AU PAS SUIVANT", () => {
@@ -186,7 +188,7 @@ test("une fenêtre préemptée ne réémet pas sa trame : la tâche reprend AU P
   eq(visites(f, 0, 3000), ["Réglages"], "1re trame servie");
   enfiler(f, commande("Arrêt", RANG.URGENT), 3500);
   eq(visites(f, 4000, 80000), ["Arrêt", "Nom"], "l'arrêt, puis la 2e trame — jamais la 1re une seconde fois");
-  eq(transfert.etat, "faite", "transfert conclu");
+  eq(transfert.etat, "interrompue", "transfert conclu, noté interrompu : un arrêt a coupé sa 1re fenêtre");
   eq(transfert.faits, 2, "deux pas accomplis");
 });
 test("rang strictement supérieur : une commande préempte la fenêtre d'une lecture, pas celle d'une commande", () => {

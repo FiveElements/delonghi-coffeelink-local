@@ -95,7 +95,12 @@ export interface PasTrame extends PasCommun {
 }
 export type Pas = PasProp | PasTrame;
 
-export type EtatTache = "attente" | "encours" | "faite" | "echouee" | "annulee";
+/**
+ * `interrompue` : tous les pas ont été livrés, mais une fenêtre a été coupée par un Arrêt (voir
+ * `ceder`). Livrée n'est pas aboutie — une préparation coupée n'a pas donné sa boisson, et
+ * « faite » le prétendait.
+ */
+export type EtatTache = "attente" | "encours" | "faite" | "interrompue" | "echouee" | "annulee";
 export type GenreTache = "lecture" | "commande";
 
 /** La clé de traduction d'un libellé de tâche (espace `task` du catalogue) et ses paramètres. */
@@ -127,6 +132,8 @@ export interface Tache<M = Record<string, unknown>> {
   faits: number;
   motif: string | null;
   repetitions: number;
+  /** Le libellé de l'Arrêt qui a coupé une fenêtre de cette tâche, `null` sinon. Voir `ceder`. */
+  coupeePar: string | null;
 }
 
 export interface FileTaches<M = Record<string, unknown>> {
@@ -209,6 +216,7 @@ export function tache<M = Record<string, unknown>>({ label, rang = RANG.LECTURE,
     /** Pas menés à bien. */
     faits: 0,
     motif: null,
+    coupeePar: null,
     /**
      * Combien de tâches de MÊME `cle` ce verdict résume. Voir `finir` : les terminées se replient
      * comme le journal replie ses lignes identiques, et le compte est ce qui empêche « réussie »
@@ -361,6 +369,12 @@ function placer<M>(file: FileTaches<M>, t: Tache<M>): void {
  * revenait en tête tenir le reste d'une fenêtre devenue vide de sens — après un Arrêt, jusqu'à
  * 60 s de présence pour une boisson coupée, devant chaque commande arrivée entre-temps.
  * Une tâche dont c'était le dernier pas se conclut quand elle repasse en tête (`tic`).
+ *
+ * **Accompli n'est pas abouti.** Quand la nouvelle tête est un Arrêt (rang `URGENT`, réservé aux
+ * arrêts), ce que la fenêtre devait laisser se dérouler a été coupé : la tâche le garde
+ * (`coupeePar`) et se conclura `interrompue`. Une préemption par une simple commande ne coupe
+ * rien sur la machine — une présence de fond écourtée n'est pas un incident, la marquer
+ * peindrait l'écran d'échecs à chaque clic.
  */
 function ceder<M>(file: FileTaches<M>, ancienne: Tache<M> | undefined): void {
   if (!ancienne || file.liste[0] === ancienne) return;
@@ -369,6 +383,8 @@ function ceder<M>(file: FileTaches<M>, ancienne: Tache<M> | undefined): void {
   p.etat = "fait";
   ancienne.faits++;
   ancienne.i++;
+  const intruse = file.liste[0];
+  if (intruse?.rang === RANG.URGENT) ancienne.coupeePar = intruse.label;
 }
 
 /**
@@ -469,7 +485,7 @@ export type EvenementFile<M> =
   | { type: "muette"; tache: Tache<M>; restantes: number }
   | { type: "annulee"; tache: Tache<M>; cause: "muette"; silencieux: true }
   | { type: "repris" | "perdu"; tache: Tache<M>; pas: Pas }
-  | { type: "faite" | "echouee"; tache: Tache<M> };
+  | { type: "faite" | "interrompue" | "echouee"; tache: Tache<M> };
 
 export function tic<M>(file: FileTaches<M>, maintenant: number): EvenementFile<M>[] {
   const ev: EvenementFile<M>[] = [];
@@ -541,10 +557,11 @@ export function tic<M>(file: FileTaches<M>, maintenant: number): EvenementFile<M
   return ev;
 }
 
-/** Fin normale d'une tâche : réussie si rien ne manque. */
+/** Fin normale d'une tâche : réussie si rien ne manque et qu'aucun Arrêt ne l'a coupée. */
 function conclure<M>(file: FileTaches<M>, t: Tache<M>, maintenant: number): EvenementFile<M>[] {
-  const etat = t.nonLus.length ? "echouee" : "faite";
-  finir(file, t, etat, t.nonLus.length ? `${t.nonLus.length} sans réponse` : null, maintenant);
+  const etat = t.nonLus.length ? "echouee" : t.coupeePar ? "interrompue" : "faite";
+  const motif = t.nonLus.length ? `${t.nonLus.length} sans réponse` : t.coupeePar ? `fenêtre coupée par « ${t.coupeePar} »` : null;
+  finir(file, t, etat, motif, maintenant);
   return [{ type: etat, tache: t }];
 }
 

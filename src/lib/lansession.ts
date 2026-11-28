@@ -33,6 +33,8 @@
  * - **Le remplissage se fait à zéro, sur un octet de plus au minimum** (`len = ib.length + 1`
  *   arrondi au multiple de 16), et le déchiffrement retire les zéros de fin.
  * - **La signature porte sur le clair**, HMAC-SHA256 avec la clé de signature du sens d'émission.
+ * - **Un `seq_no` déjà reçu dans la session est refusé** (voir `decapsulate`) : sans ce contrôle,
+ *   deux messages capturés se rejouaient, signature valide comprise.
  *
  * Tout cela est un port validé en production contre la vraie machine ; ne pas « simplifier ».
  */
@@ -94,6 +96,17 @@ export interface SessionLan {
   decapsulate(body: CorpsChiffre): string;
 }
 
+/** Numéros de séquence entrants mémorisés par session, au plus. Voir `vus` dans `makeLanSession`. */
+const SEQ_MEMOIRE = 4096;
+
+/** Le `seq_no` d'un clair `{seq_no, data}`, s'il y en a un entier ; `undefined` sinon. */
+function lireSeqNo(texte: string): number | undefined {
+  let v: unknown;
+  try { v = JSON.parse(texte); } catch { return undefined; }
+  if (typeof v !== "object" || v === null || !("seq_no" in v)) return undefined;
+  return Number.isInteger(v.seq_no) ? Number(v.seq_no) : undefined;
+}
+
 export function makeLanSession({ lanKey, random1, random2, time1, time2, role }: ParametresSession): SessionLan {
   if (role !== "client" && role !== "device") throw new Error(`rôle inconnu : ${role}`);
   const R1 = Buffer.from(random1, "utf8");
@@ -126,6 +139,21 @@ export function makeLanSession({ lanKey, random1, random2, time1, time2, role }:
   d.setAutoPadding(false);
 
   let seq = 0;
+  /**
+   * Les `seq_no` déjà acceptés dans CETTE session, sens entrant (une session ne déchiffre qu'un
+   * sens). Morte avec la session, donc remise à zéro à chaque échange de clés — comme le compteur
+   * des deux bouts.
+   *
+   * ⚠️ **Un ensemble, pas « strictement supérieur au dernier ».** Rien dans ce dépôt ne PROUVE que
+   * la machine (ADA) numérote strictement en croissant, ni ce qu'elle fait au rebouclage : les
+   * captures de `scripts/captures/` sont des trames ECAM décodées, sans enveloppe, et la seule
+   * numérotation observable ici est la NÔTRE (`seq++` depuis 0). Exiger la croissance stricte
+   * sur une hypothèse risquait de refuser des datapoints réels en silence ; refuser un numéro
+   * déjà VU ne suppose rien — un rejeu exact est toujours faux. Borné à `SEQ_MEMOIRE` entrées
+   * (les plus anciennes sortent) : un compteur qui reboucle retrouve ses numéros, une session
+   * longue ne fait pas grossir la mémoire.
+   */
+  const vus = new Set<number>();
   return {
     role,
     random1,
@@ -170,7 +198,21 @@ export function makeLanSession({ lanKey, random1, random2, time1, time2, role }:
         const e: ErreurSignature = Object.assign(new Error(body.sign ? "signature HMAC invalide" : "signature absente"), { clair: clair.toString("utf8") });
         throw e;
       }
-      return clair.toString("utf8");
+      // Après la signature, jamais avant : un message refusé n'a pas à marquer son numéro comme vu.
+      // Un clair sans `seq_no` entier passe — on ne l'a jamais vu manquer, et le refuser serait
+      // l'hypothèse non prouvée ci-dessus sous une autre forme ; il ne se rejoue que si le pair
+      // légitime en émet.
+      const texte = clair.toString("utf8");
+      const n = lireSeqNo(texte);
+      if (n !== undefined) {
+        if (vus.has(n)) {
+          const e: ErreurSignature = Object.assign(new Error(`seq_no ${n} déjà reçu dans cette session : rejeu refusé`), { clair: texte });
+          throw e;
+        }
+        vus.add(n);
+        if (vus.size > SEQ_MEMOIRE) vus.delete(vus.values().next().value as number);
+      }
+      return texte;
     },
   };
 }
