@@ -190,6 +190,7 @@ yet type-checking so they looked alive. They were deleted. Do not add a `route.t
 | `beverages.ts` | per-model beverage catalog, Ayla property namespace, recipe bounds |
 | `ingredients.ts` + `transfert.ts` | what actually goes into a persistent recipe write |
 | `trame-bornes.ts` | bounds-frame encoding |
+| `parametres.ts` | `0xA2` / `0x95` response decoding (parameters, settings), length + CRC checked |
 | `monitor.ts` | real-time state / sensor / alarm decoding |
 | `compteurs.ts` | the named-counter table: which Ayla property counts what, and how to read its value |
 | `profiles.ts` | profile names, favourites, checksums, Bean System |
@@ -205,18 +206,25 @@ table — a drift between them is invisible at runtime.
 ⚠️ **A received frame is checked whole before it is decoded** — `trameEntiere` (`trame-bornes.ts`)
 returns the announced length (`len + 1`) or throws on a truncated frame or a bad CRC. The decoders
 used to read `buf[i]` without knowing the byte existed: a truncated frame gave `undefined` turned
-into 0, a corrupted one gave plausible values. `monitor.ts`, `profiles.ts` and `beverages.ts` go
-through it. **`decodeParameters` / `decodeSettings` in `server.ts` do not yet** — the `0xA2` /
-`0x95` answers are still read unchecked; that is the remaining hole, not a choice.
+into 0, a corrupted one gave plausible values. `monitor.ts`, `profiles.ts`, `beverages.ts` and
+`parametres.ts` go through it — the last one holds `decodeParameters` (`0xA2`) and `decodeSettings`
+(`0x95`), moved out of `server.ts` (still their only caller) so that `verif-args.ts` can prove the
+rejection. A rejected frame is journaled by the caller (`décodage impossible (…)`) and stored
+nowhere. The CRC holds on the one real `0xA2` answer kept in the history
+(`d0 0b a2 0f 0b b8 00 00 23 91 2e c0`); no real `0x95` answer is kept, so for that one it is
+inferred from every other ECAM frame, not observed.
 
 ### Scheduler semantics
 
 One queue per machine. A task is a list of steps plus a policy; four ranks, and one preemption rule:
-a task may be suspended *at a step boundary* by a strictly higher rank — with one exception, a
-**served `fenetre` step**, which waits for nothing and so stays preemptable mid-step (`enVol` in
-`tasks.ts`): otherwise « Arrêt » would sit behind a 75 s preparation window. A `prop` or `reponse`
-step in flight is never cut, because its late answer would validate the intruder's step. Three wait
-natures:
+a task may be suspended *at a step boundary* by a strictly higher rank, no exception. **The
+boundary is defined per wait nature**: a `prop` / `reponse` step crosses it when its answer arrives
+(or its deadline passes) — in flight it is never cut, because its late answer would validate the
+intruder's step; a `fenetre` step crosses it **as soon as its frame is served**: the command is
+delivered, the rest of the window only measures presence. So preempting a window *completes* that
+step (`ceder` in `tasks.ts`) — the acting frame is never re-sent, and after « Arrêt » cuts a
+preparation, the preparation concludes instead of coming back to hold up to 60 s of presence for a
+stopped beverage. Three wait natures:
 
 - `prop` — an Ayla property read: wait for the machine to POST *that* property;
 - `reponse` — a reading ECAM command (`0x75`, `0xA2`, `0xA3`, `0xA6`, `0xB0`, `0xBA`): wait for the

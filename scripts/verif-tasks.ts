@@ -145,6 +145,79 @@ test("un ARRÊT coupe une préparation dont la fenêtre court (rien n'est en vol
   enfiler(f, commande("Arrêt", RANG.URGENT), 1000);
   eq(tete(f).label, "Arrêt", "l'arrêt prend la tête tout de suite");
 });
+/**
+ * Visites simulées, une par seconde, chacune précédée d'un tic — ce que fait server.ts. Rend la
+ * liste des TRAMES servies (les « pas »), dans l'ordre : c'est elle qui dit si une trame agissante
+ * repart, et une trame qui repart, c'est un deuxième café.
+ */
+const visites = (f: FileTaches, de: number, a: number) => {
+  const servis: string[] = [];
+  for (let t = de; t <= a; t += 1000) {
+    f.dernierContact = t;
+    tic(f, t);
+    const s = aServir(f, t);
+    if (s.quoi === "pas") servis.push(s.pas.nom);
+  }
+  return servis;
+};
+test("ARRÊT pendant la fenêtre d'une préparation : servi à la visite suivante, 0x83 jamais réémise", () => {
+  const f = nouvelleFile();
+  const prep = tache({ label: "Préparer", rang: RANG.COMMANDE, pas: [pasTrame("Préparer 0x83", "AAA=", { attente: "fenetre", ms: 75000, cmd: 0x83 })] });
+  enfiler(f, prep, 0);
+  eq(visites(f, 0, 5000), ["Préparer 0x83"], "la préparation part une fois");
+  enfiler(f, tache({ label: "Arrêt", rang: RANG.URGENT, pas: [pasTrame("Arrêt", "AAA=", { attente: "fenetre", ms: 15000 })] }), 5500);
+  // La trame de la préparation est livrée : préempter sa fenêtre accomplit le pas, il ne le suspend pas.
+  eq(prep.pas[0].etat, "fait", "pas de la préparation accompli à la préemption");
+  const s = aServir(f, 6000);
+  eq(s.quoi === "pas" ? s.pas.nom : s.quoi, "Arrêt", "l'arrêt part à la visite suivante");
+  const suite = visites(f, 7000, 120000);
+  eq(suite, [], "rien ne repart ensuite — surtout pas la boisson");
+  eq(prep.etat, "faite", "la préparation se conclut sans relancer");
+  eq(f.liste.length, 0, "file vide : la fenêtre restante n'a pas bloqué la file");
+});
+test("une fenêtre préemptée ne réémet pas sa trame : la tâche reprend AU PAS SUIVANT", () => {
+  // Le cas du transfert de recette : deux trames agissantes, chacune avec sa fenêtre.
+  const f = nouvelleFile();
+  const transfert = tache({ label: "Transfert", rang: RANG.COMMANDE, pas: [
+    pasTrame("Réglages", "AAA=", { attente: "fenetre", ms: 20000 }),
+    pasTrame("Nom", "AAA=", { attente: "fenetre", ms: 20000 }),
+  ] });
+  enfiler(f, transfert, 0);
+  eq(visites(f, 0, 3000), ["Réglages"], "1re trame servie");
+  enfiler(f, commande("Arrêt", RANG.URGENT), 3500);
+  eq(visites(f, 4000, 80000), ["Arrêt", "Nom"], "l'arrêt, puis la 2e trame — jamais la 1re une seconde fois");
+  eq(transfert.etat, "faite", "transfert conclu");
+  eq(transfert.faits, 2, "deux pas accomplis");
+});
+test("rang strictement supérieur : une commande préempte la fenêtre d'une lecture, pas celle d'une commande", () => {
+  const f = nouvelleFile();
+  const fond = tache({ label: "Fond", rang: RANG.LECTURE, pas: [pasTrame("Fond", "AAA=", { attente: "fenetre", ms: 20000 })] });
+  enfiler(f, fond, 0);
+  aServir(f, 0);
+  enfiler(f, commande("Allumer"), 100);
+  eq(tete(f).label, "Allumer", "la commande prend la tête");
+  eq(fond.pas[0].etat, "fait", "la fenêtre préemptée est accomplie");
+  const g = nouvelleFile();
+  const prep = commande("Préparer");
+  enfiler(g, prep, 0);
+  aServir(g, 0);
+  enfiler(g, commande("Allumer"), 100);
+  eq(tete(g).label, "Préparer", "même rang : pas de préemption");
+  eq(prep.pas[0].etat, "servi", "la fenêtre court toujours");
+});
+test("un pas reponse servi n'est toujours pas préemptable, même par un ARRÊT", () => {
+  const f = nouvelleFile();
+  const lect = tache({ label: "Lecture", rang: RANG.COMMANDE, pas: [pasTrame("0xA2", "AAA=", { attente: "reponse", cmd: 0xa2 })] });
+  enfiler(f, lect, 0);
+  aServir(f, 0);
+  enfiler(f, commande("Arrêt", RANG.URGENT), 100);
+  eq(tete(f).label, "Lecture", "la lecture garde la tête");
+  eq(aServir(f, 200).quoi, "soutien", "rien d'autre n'est servi");
+  eq(lect.pas[0].etat, "servi", "toujours en vol");
+  reponse(f, { reponse: true, cmd: 0xa2 }, 1000);
+  const s = aServir(f, 1100);
+  eq(s.quoi === "pas" ? s.tache.label : s.quoi, "Arrêt", "l'arrêt part dès la réponse");
+});
 test("la réponse tardive de A ne valide pas le pas de B (cmd fourni)", () => {
   const f = nouvelleFile();
   const a = tache({ label: "A", rang: RANG.LECTURE_BASSE, pas: [pasTrame("A", "AAA=", { attente: "reponse", cmd: 0xa2 })] });

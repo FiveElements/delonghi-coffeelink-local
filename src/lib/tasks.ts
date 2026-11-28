@@ -290,6 +290,11 @@ export function vue<M>(file: FileTaches<M>) {
  * Deux exceptions, chacune pour la sûreté : la suspension attend la fin d'un pas en vol (`enVol`),
  * et `URGENT` échappe au plafond `MAX_FILE`.
  *
+ * **La frontière de pas, précisément** : un pas `prop` / `reponse` est franchi quand sa réponse
+ * arrive (ou que son échéance passe) ; un pas `fenetre` l'est dès que sa trame est SERVIE — la
+ * commande est livrée, la fenêtre qui suit ne mesure qu'une présence. Une préemption pendant cette
+ * fenêtre l'accomplit donc (`ceder`) au lieu de la suspendre.
+ *
  */
 export type ResultatEnfiler<M> =
   | { ok: true; fusion?: true; tache: Tache<M> }
@@ -324,8 +329,8 @@ export function enfiler<M>(file: FileTaches<M>, t: Tache<M>, maintenant: number,
 /**
  * **La tête attend-elle une réponse ?** Un pas `prop` ou `reponse` servi est en vol : le
  * suspendre ferait servir une autre trame pendant que la sienne est attendue, et sa réponse
- * tardive pourrait valider le pas de l'intruse. Un pas `fenetre` servi, lui, n'attend RIEN — il
- * tient la présence — : il reste préemptable, et c'est ce qui permet à « Arrêt » de couper une
+ * tardive pourrait valider le pas de l'intruse. Un pas `fenetre` servi, lui, n'attend RIEN : sa
+ * trame est livrée, la frontière est déjà franchie — c'est ce qui permet à « Arrêt » de couper une
  * préparation dont la fenêtre dure 75 s au lieu d'attendre qu'elle s'écoule.
  */
 function enVol<M>(t: Tache<M> | undefined): boolean {
@@ -339,10 +344,31 @@ function enVol<M>(t: Tache<M> | undefined): boolean {
  * et `reclasser` lui rend la tête dès que le pas en vol est conclu.
  */
 function placer<M>(file: FileTaches<M>, t: Tache<M>): void {
-  const debut = enVol(file.liste[0]) ? 1 : 0;
+  const tete = file.liste[0];
+  const debut = enVol(tete) ? 1 : 0;
   let i = file.liste.findIndex((x, k) => k >= debut && x.rang > t.rang);
   if (i < 0) i = file.liste.length;
   file.liste.splice(i, 0, t);
+  ceder(file, tete);
+}
+
+/**
+ * **L'ancienne tête vient de perdre sa place : si elle tenait une fenêtre, ce pas est accompli.**
+ *
+ * Sa trame est partie, la machine l'a prise : la commande est livrée, et le reste de la fenêtre ne
+ * mesurait qu'une présence — que l'intruse tient désormais à sa place. La suspendre telle quelle
+ * (pas `servi`) ne réémettait rien, `aServir` ne sert qu'un pas en `attente` ; mais la tâche
+ * revenait en tête tenir le reste d'une fenêtre devenue vide de sens — après un Arrêt, jusqu'à
+ * 60 s de présence pour une boisson coupée, devant chaque commande arrivée entre-temps.
+ * Une tâche dont c'était le dernier pas se conclut quand elle repasse en tête (`tic`).
+ */
+function ceder<M>(file: FileTaches<M>, ancienne: Tache<M> | undefined): void {
+  if (!ancienne || file.liste[0] === ancienne) return;
+  const p = ancienne.pas[ancienne.i];
+  if (p?.type !== "fenetre" || p.etat !== "servi") return;
+  p.etat = "fait";
+  ancienne.faits++;
+  ancienne.i++;
 }
 
 /**
@@ -350,7 +376,9 @@ function placer<M>(file: FileTaches<M>, t: Tache<M>): void {
  * égal et la tâche suspendue reste devant celles de son rang arrivées après elle.
  */
 function reclasser<M>(file: FileTaches<M>): void {
-  if (!enVol(file.liste[0])) file.liste.sort((a, b) => a.rang - b.rang);
+  const tete = file.liste[0];
+  if (!enVol(tete)) file.liste.sort((a, b) => a.rang - b.rang);
+  ceder(file, tete);
 }
 
 /**
