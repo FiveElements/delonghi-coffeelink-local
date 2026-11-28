@@ -119,12 +119,16 @@ node scripts/verif-lansession.ts  # both LAN-session roles talking to each other
 node scripts/verif-proprietes.js   # fast-check: random frames never crash a decoder; LAN session round-trips any payload (.js on purpose: Scorecard Fuzzing)
 node scripts/verif-apps.ts        # app registry + payload parsing
 node scripts/verif-args.ts        # ECAM frame table / argument decoding (byte offsets)
+node scripts/verif-trame-boisson.ts # the 0x83 beverage frame builder, held against the decoder
 node scripts/verif-transfert.ts   # writing a local recipe into a machine slot
 node scripts/verif-compteurs.ts   # named-counter table: beverage ids read back out of the property names, water divisor
 node scripts/verif-messages.ts    # literal next-intl keys exist in messages/fr.json
 node scripts/verif-contraste.ts   # WCAG + ΔL* of both finishes, read back out of globals.css
 node scripts/verif-images.ts      # both artwork fingerprint chains — beverages AND beans (producer → table → URL → cache rule)
 node scripts/verif-datum-grains.ts # sniffing a bean photo pulled from the Ayla datum (type from bytes, not from a claim)
+node scripts/verif-beansync.ts    # selected bean, read two ways: byte 50 of each 0xBA frame and word 4 of d260_beansystem_sync_par
+node scripts/verif-store.ts       # the SQLite store (store.ts), on a throwaway database
+node scripts/verif-machine-models.ts # serial number → model key → generated table
 node scripts/verif-bean-adapt.ts  # BOTH Bean Adapt rules, each against a recorded matrix: refine on 9 cells, create on all 8
 node scripts/verif-surfaces.ts    # the 12 surfaces in a REAL headless Chrome (see § Styling)
 node scripts/verif-mcp.ts         # MCP server: catalog drift, token auth/scope enforcement, a real start_beverage round-trip through fausse-machine.ts
@@ -156,8 +160,8 @@ node scripts/import-bean-images.ts                # bean artwork, from De'Longhi
 node scripts/extract-bean-creation.ts             # the 8 cells of getBeanSystem.sr (--brut replays them offline)
 ```
 
-`.github/workflows/ci.yml` runs all of the above plus the SQLite migration chain (v1→v2→v3 on
-fabricated databases) and a Docker smoke test. Read it before adding a check — it is the closest
+`.github/workflows/ci.yml` runs all of the above plus the SQLite migration chain (v1→v2→v3→v4
+on fabricated databases) and a Docker smoke test. Read it before adding a check — it is the closest
 thing to a spec of what can be proven without a coffee machine.
 
 ## Architecture
@@ -198,20 +202,40 @@ yet type-checking so they looked alive. They were deleted. Do not add a `route.t
 Frame constructors live in `server.ts`, decoders in `ecam-args.ts`. They **must** read the same
 table — a drift between them is invisible at runtime.
 
+⚠️ **A received frame is checked whole before it is decoded** — `trameEntiere` (`trame-bornes.ts`)
+returns the announced length (`len + 1`) or throws on a truncated frame or a bad CRC. The decoders
+used to read `buf[i]` without knowing the byte existed: a truncated frame gave `undefined` turned
+into 0, a corrupted one gave plausible values. `monitor.ts`, `profiles.ts` and `beverages.ts` go
+through it. **`decodeParameters` / `decodeSettings` in `server.ts` do not yet** — the `0xA2` /
+`0x95` answers are still read unchecked; that is the remaining hole, not a choice.
+
 ### Scheduler semantics
 
 One queue per machine. A task is a list of steps plus a policy; four ranks, and one preemption rule:
-a task may be suspended *at a step boundary* by a strictly higher rank. Three wait natures:
+a task may be suspended *at a step boundary* by a strictly higher rank — with one exception, a
+**served `fenetre` step**, which waits for nothing and so stays preemptable mid-step (`enVol` in
+`tasks.ts`): otherwise « Arrêt » would sit behind a 75 s preparation window. A `prop` or `reponse`
+step in flight is never cut, because its late answer would validate the intruder's step. Three wait
+natures:
 
 - `prop` — an Ayla property read: wait for the machine to POST *that* property;
-- `reponse` — a reading ECAM command (`0x75`, `0xA2`, `0xA3`, `0xA6`, `0xB0`, `0xBA`): wait for any
-  `data_response`;
+- `reponse` — a reading ECAM command (`0x75`, `0xA2`, `0xA3`, `0xA6`, `0xB0`, `0xBA`): wait for the
+  answer **to that command** — every step carries its `cmd` (`pasPourTrame` reads it out of the
+  frame) and every answer is matched on it (`buf[2]` of a `data_response`, `0x75` for a monitor
+  push, `0xBA` for a Bean System one). Matching "any `data_response`" let a suspended task's late
+  answer complete someone else's read;
 - `fenetre` — an *acting* command (`0x84`, `0x83`, `0xA9`, `0xBB`, `0xB9`): nothing comes back, so
   `ms` is a **sustained-presence duration** — reaching it is success, not a timeout.
 
 `device_connected` is served first and then every fifth visit, or the machine stops considering us
 present. Presence-sustaining frames must be side-effect free: **`0xA9` selects a profile**, so using
 it as a heartbeat silently forces profile 1.
+
+Two admission rules in `enfiler`: the queue holds at most `MAX_FILE` (32) tasks, but **`URGENT` is
+exempt** — Stop is the one gesture that acts on a machine that is pouring, and 32 pending reads are
+no reason to lose it. And two identical pending requests (same `cle`) **merge, and the survivor
+takes the higher rank of the two** and is re-placed: merging an urgent request into a background
+read used to leave it waiting at the background's rank, silently.
 
 ### The journal — an append-only stream, not a list that gets re-downloaded
 
@@ -265,6 +289,11 @@ outright in its datapoint branch. The Home Assistant integration `actabi/delongh
 divides by 1000 — its litres are twice too large. Do not import that value from it; part of the
 name table does come from that project, and this is the one number in it that is wrong.
 
+Both channels show litres **to the tenth** (`valeurAffichee` in `compteurs.ts` for `d553`, `known` in
+`buildStatsPayload` in `server.ts` for parameter 106): rounding to the litre erased
+up to 0.5 L — about ten cups — on a counter that moves by a few decilitres a day. The raw value
+travels next to it, and that is what proves the conversion.
+
 ⚠️ **Two sources, and they do not carry the same weight.** `source: "apk"` means the name is written
 in the app binary — 14 names. `source: "eletta"` means it comes from a real Ayla property dump of an
 Eletta Explore 450.65.G published by that HA integration: it proves the property exists on *that*
@@ -285,6 +314,13 @@ One SQLite file (`data/lan-server.db`; `DATA_DIR` / `DATABASE_FILE`), WAL + `syn
 themselves through `bootMessages`. Every data
 table carries a `machine` column with `ON DELETE CASCADE`; machine-independent settings live in
 their own `settings` table.
+
+The takeover of the pre-SQLite JSON files (`machine-beverages.json`, `recipes.json`,
+`lan-key.json`) runs **inside the transaction that creates the schema**: it used to run after, on a
+base already marked v4, so a crash on first boot left an "up-to-date", empty database that nothing
+ever took over again. Now it is all or nothing, and the files are renamed only after the `COMMIT`. A machine id is **never reassigned**, even after
+deletion: the highest one ever issued is kept in `settings` (`machineSeq`), because a browser tab
+still holding `m3` in `localStorage` would otherwise silently drive a different, newer `m3`.
 
 A bean's photo has **two possible origins**, both landing under the same `s<n>` key: cropped here
 by `PhotoGrains` (WebP 300×340), or pulled from the cloud by `POST /api/beans/visual/import` — the
@@ -374,6 +410,12 @@ cells of the bean-creation rule. That script writes **no table at all** if one c
 with seven cells out of eight would make the eighth setting up, which is the failure this whole repo
 is built to avoid.
 
+⚠️ **The serial-number derivation has never been held against a real `d2 70` frame.** It was read
+out of the decompiled app (`l1()` / `m1()`), and the header of `src/lib/machine-models.ts` says
+so. `verif-machine-models.ts` proves the code does what the derivation says, not that the
+derivation matches what a machine sends. That is why `identify()` never guesses: when the slice
+is not five digits it returns a reason *and* the frame in hex.
+
 ### App multiplexer — off by default
 
 `PROXY_APPS=1` makes this server answer `/regtoken.json` and `/local_reg.json` as the machine would,
@@ -397,6 +439,32 @@ itself unauthenticated, like the rest of `/api/*`: anyone who can reach the serv
 own all-scopes token, or skip tokens entirely and call `/api/command` directly. What a token buys is
 narrowing what an *already-trusted* agent is allowed to do — never keeping an untrusted caller out.
 
+⚠️ **`/api/*` and `/mcp` refuse what a *browser* could be tricked into sending** (`gardeNavigateur`
+in `server.ts`), in this order: a `Host` off the allow-list — IP literals, `localhost`, `*.local`,
+`SERVER_IP`, plus whatever `ALLOWED_HOSTS` adds (comma-separated) — gets a 403 (that is what
+defeats DNS rebinding); a *mutating* request (`POST`/`PUT`/`PATCH`/`DELETE`) with a foreign
+`Origin` gets a 403; a mutating request with a body that is not `Content-Type: application/json`
+gets a 415 (an HTML form cannot set it, and a cross-origin `fetch` that does triggers a preflight
+we never answer). An *absent* `Origin` passes — `curl` and MCP clients send none — and so does an
+absent `Host`: no browser omits it, so it is not the vector aimed at. The cost: serving the UI under a name such as `cafe.maison.lan` gives a 403 until
+that name is in `ALLOWED_HOSTS`. None of this applies to the device-facing routes
+(`/local_lan/*`, `/regtoken.json`, `/local_reg.json`, the OTA paths): no browser talks there, and
+the machine does not choose its headers. And it is **anti-CSRF, not authentication** —
+`curl` from any host that can reach the server still drives `/api` freely; the paragraph above
+still holds.
+
+**Caps, so that one client cannot exhaust the process.** A request body is read up to **64 KiB**
+(`CORPS_MAX`), or **1.4 × `IMAGE_TAILLE_MAX`** on the two routes that carry a bean photo as a data
+URL (base64 weighs 4/3 of its bytes); beyond, reading stops, a 413 goes out and the connection is
+cut — the rest is never accumulated. At most **32** SSE subscribers (`SSE_MAX`; the 33rd gets a
+503). And `ENV_FILE` names the file that fills absent variables (default `.env.local`, relative
+to the cwd): the test rigs point it at a non-existent file, so a developer's `DATABASE_FILE` can
+never send `verif-mcp` / `verif-surfaces` writing into the real database.
+
+**Not done, on purpose: strict peer binding.** The device-facing routes do not pin the machine to
+the address it first spoke from, so a host on the same LAN can still present itself as the single
+configured machine. That is an accepted choice, not an oversight.
+
 ## Front-end conventions
 
 Next 16 App Router, React 19, TypeScript 7, `next-intl`. **Code, comments and UI are in French**,
@@ -413,6 +481,14 @@ with dense "why did this end up like this" headers — match that register.
   returns `false` in a sandboxed iframe, which makes every button on the page silently inert.
 - Anything the machine can change arrives over SSE (`/api/events`, hook in `src/app/events.ts`),
   never by polling — a property read is not synchronous; the machine pushes 2–4 s later.
+- **Every action response goes through `echecAction` / `compteRendu`, every `catch` through
+  `raisonEchec` / `echecReseau`** (`src/app/register.ts`). Pages that only looked at `error`
+  announced « envoyé » to a machine that heard nothing (the `register` verdict was ignored), and
+  handlers with `try … finally` and no `catch` left a page mute, or stuck on « Lecture en cours… ».
+- **A name typed for the machine has the frame's width, not a round number.** Profile names and
+  custom-recipe names are **10 characters** — `0xA5` / `0xAB` carry 20 bytes of UTF-16BE; the
+  server refuses beyond, and the inputs say `maxLength={10}`. A Bean Adapt name (`0xBB`,
+  `encodeBeanName`) is 20 characters.
 
 ### Styling: Tailwind 4 + shadcn/ui, and one law about the cascade
 
@@ -438,6 +514,10 @@ why. Paid for once by `.confirm` (57 dead lines) and once by three card modifier
 ⚠️ **Two remaps are product law, not taste.** `--primary` is the **neutral** key, *not* amber: a
 command's colour states its FUNCTION (`marche` starts something on the appliance, `arret` stops or
 destroys, amber means *chosen*), never its importance. And `--radius` is 2 px, the boîtier's value.
+
+⚠️ **Touch sizes live on the components** (`tactile:` utilities in `src/ui/slider.tsx` and
+`src/ui/switch.tsx`), **not in `surfaces.css`**: they used to sit in a `pointer: coarse` block
+there, which lost to the components' own utilities — the law above, once more.
 
 ⚠️ **A Radix `Switch` / `Checkbox` / `RadioGroupItem` is a `<button>`, and a `<label>` does not name
 a button.** Wrapping one produces an unnamed control, in silence, where the native input got a name

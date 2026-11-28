@@ -145,13 +145,17 @@ function decoder(texte: string): Reglages & { tips: unknown } {
   if (!s) throw new Error(`json_settings sans clé « settings » : ${enveloppe.json_settings.slice(0, 200)}`);
 
   /* Les valeurs arrivent en CHAÎNES alors que les modèles Java déclarent des nombres — Gson fait la
-     coercition côté app. Ici on la fait explicitement, et on refuse ce qui n'est pas un nombre. */
+     coercition côté app. Ici on la fait explicitement, et on refuse ce qui n'est pas un ENTIER
+     naturel écrit en chiffres : `Number()` seul rendait 0 pour "", " " ou null, 1 pour true, et
+     laissait passer -1 ou 4.5 — autant de réglages plausibles qu'aucun service n'a rendus. */
   /* Rempli champ par champ juste en dessous, et la boucle lève plutôt que d'en laisser un vide :
      le type complet n'est vrai qu'à sa sortie, d'où l'assertion. */
   const out = {} as Reglages;
   for (const champ of ["grinder", "temperature", "aroma"] as const) {
-    const v = Number(s[champ]);
-    if (!Number.isFinite(v)) throw new Error(`${champ} = ${JSON.stringify(s[champ])}, pas un nombre`);
+    const lu = s[champ];
+    const ecrit = typeof lu === "string" || typeof lu === "number" ? String(lu) : null;
+    const v = ecrit !== null && /^\d+$/.test(ecrit) ? Number(ecrit) : NaN;
+    if (!Number.isInteger(v)) throw new Error(`${champ} = ${JSON.stringify(lu)}, pas un entier naturel`);
     out[champ] = v;
   }
   /* `tips` est prévu par le modèle `Settings` et n'a jamais été observé. On le relève s'il vient,

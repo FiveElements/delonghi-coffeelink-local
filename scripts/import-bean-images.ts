@@ -11,19 +11,21 @@
  *
  * (`p257z6/C2201d1.b()` construit ce Retrofit, `p137n6/b.a()` nomme le fichier.)
  *
- * ## Ce que ce script produit, et ce qu'il ne committe pas
+ * ## Ce que ce script produit — tout est versionné
  *
- * - **`src/lib/bean-images.json`** — la CORRESPONDANCE, versionnée : des rôles, des noms de
- *   fichiers, une empreinte. Aucune œuvre graphique.
- * - **`public/grains/*.png`** — les IMAGES. Le répertoire était gitignoré ; il est versionné
- *   depuis le 2026-09-01, sur décision explicite du propriétaire du dépôt.
+ * - **`src/lib/bean-images.json`** — la CORRESPONDANCE : des rôles, des noms de fichiers, une
+ *   empreinte. Aucune œuvre graphique.
+ * - **`public/grains/*.png`** — les IMAGES.
  * - **`public/grains/questions.json`** — la réponse du service, telle quelle, à côté des images.
  *   C'est elle qui rend `--json` possible, donc le script rejouable **sans réseau**.
  *
- * ⚠️ **La même séparation que pour les dessins de boisson, et pour la même raison.** Ces visuels
- * appartiennent à De'Longhi ; `lan-server` est publié — image GHCR, archive de release, dépôt
- * public. Qu'ils viennent d'un S3 ouvert ne les rend pas redistribuables : un seau public autorise
- * à lire, pas à republier. Le dépôt transporte le savoir — la table.
+ * ⚠️ **Ces visuels appartiennent à De'Longhi, et le dépôt les redistribue — par décision.**
+ * `public/grains/` (comme `public/boissons/`) était gitignoré : un seau S3 public autorise à
+ * lire, pas à republier, et `lan-server` est publié (dépôt public, image GHCR, archive de
+ * release). Le 2026-09-01, le propriétaire du dépôt a décidé explicitement de les versionner
+ * (AGENTS.md, § *Secrets and data hygiene*). Ce script et la table restent tels quels : ils ne
+ * sont simplement plus le seul moyen d'obtenir les fichiers. Retirer ces images plus tard
+ * demanderait une réécriture de l'historique, pas un `git rm`.
  *
  * ## Les octets ne sont PAS ré-encodés
  *
@@ -90,6 +92,9 @@ const JSON_LOCAL = arg("json");
 const SORTIE_IMG = join(RACINE, "public", "grains");
 const SORTIE_MAP = join(RACINE, "src", "lib", "bean-images.json");
 const SORTIE_QUESTIONS = join(SORTIE_IMG, "questions.json");
+/* Sans délai, un S3 qui accepte la connexion puis se tait suspend le script indéfiniment, sans
+   rien dire. Le signal couvre aussi la lecture du corps : un transfert qui cale échoue pareil. */
+const DELAI_RESEAU_MS = 20_000;
 
 /* Une déclaration de fonction, pas une flèche : c'est ce qui laisse `never` rétrécir les types
    après chaque `stop(...)` (une réponse absente, un `fetch` qui n'a rien rendu). */
@@ -160,7 +165,7 @@ async function lireQuestions() {
   const url = BASE + FICHIER_QUESTIONS;
   let r: Response;
   try {
-    r = await fetch(url);
+    r = await fetch(url, { signal: AbortSignal.timeout(DELAI_RESEAU_MS) });
   } catch (e) {
     stop(
       2,
@@ -263,7 +268,7 @@ async function obtenir(role: string, url: string) {
   }
   let r: Response;
   try {
-    r = await fetch(url);
+    r = await fetch(url, { signal: AbortSignal.timeout(DELAI_RESEAU_MS) });
   } catch (e) {
     stop(5, `Impossible de télécharger ${url}`, `  ${message(e)}`);
   }

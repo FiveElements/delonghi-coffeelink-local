@@ -106,6 +106,8 @@ spécificités du conteneur, dans [DOCKER.md](DOCKER.md). L'essentiel :
 | `MACHINE_MODEL_KEY` | forçage du modèle ; lu sur la machine sinon |
 | `MACHINE_GENERATION` | forçage de la génération ECAM (`classic` / `striker`) ; déduite du modèle sinon |
 | `DATA_DIR`, `DATABASE_FILE` | emplacement du stockage SQLite |
+| `ALLOWED_HOSTS` | noms d'hôte (séparés par des virgules) sous lesquels l'interface est servie. `/api` et `/mcp` répondent **403** à tout autre nom — c'est ce qui déjoue le *rebinding* DNS. Les littéraux IP, `localhost`, les noms en `.local` et `SERVER_IP` passent sans y figurer : à renseigner seulement pour un nom comme `cafe.maison.lan` |
+| `ENV_FILE` | le fichier qui complète les variables absentes, relatif au répertoire courant (défaut `.env.local`) ; un chemin inexistant n'en lit aucun |
 | `GIGYA_API_KEY`, `GIGYA_DATACENTER`, `AYLA_APP_ID`, `AYLA_APP_SECRET`, `AYLA_REFRESH_PATH` | surchargent les constantes APK de `cloud-app.json` pour la récupération de la clé LAN — rien à saisir en usage normal, utile seulement hors zone Europe ou après une rotation côté De'Longhi |
 | `AYLA_TOKEN` | optionnel ; sert uniquement à la vérification OTA cloud de la page Système, pas au pilotage local |
 | `PROXY_APPS` | **éteint par défaut.** Allume le multiplexeur d'applications : le serveur répond alors à `/regtoken.json` et `/local_reg.json` comme la machine, pour que plusieurs apps se partagent son unique `local_reg`. C'est une usurpation, à n'allumer que sur son propre réseau. Le SDK Ayla construit ses URL sans port (`http://<ip>/`), donc les apps ne cherchent la machine que sur le port 80 : il faut y écouter (`SERVER_PORT=80`) ou rediriger, sinon aucune ne nous trouve |
@@ -248,6 +250,10 @@ routeurs grand public savent le faire par adresse MAC ou par client.
 - Un reverse proxy pour l'interface est possible, mais **`/local_lan/*` doit rester joignable en
   direct par la machine** : son client HTTP est rudimentaire et ne supporte pas les en-têtes
   ajoutés par un proxy.
+- L'interface refuse ce qu'une **page web tierce** pourrait lui faire envoyer : un nom d'hôte non
+  autorisé (voir `ALLOWED_HOSTS`) ou une `Origin` étrangère reçoivent un 403, un corps qui n'est pas
+  du JSON un 415. C'est une protection anti-CSRF, **pas une authentification** : `curl` depuis le
+  réseau pilote toujours la machine.
 - Désactivez **UPnP** sur le routeur : c'est ce qui pourrait ouvrir un port sans que vous le
   demandiez.
 

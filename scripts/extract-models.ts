@@ -66,7 +66,8 @@ for (const m of src.machines) {
 const out = {
   _source: `assets/MachinesModels.json de l'APK Coffee Link — table « ${src.name} » v${src.version}. Extraction automatique (scripts/extract-models.ts) : ne pas editer a la main.`,
   _scope:
-    "Uniquement les modeles dont connectionType n'est pas « BT » : un modele purement Bluetooth ne peut pas parler le LAN mode Ayla. 30 entrees sur les 117 de la table.",
+    // Les deux comptes sont CALCULES : ecrits en dur, ils mentaient des la premiere table modifiee.
+    `Uniquement les modeles dont connectionType n'est pas « BT » : un modele purement Bluetooth ne peut pas parler le LAN mode Ayla. ${Object.keys(models).length} entrees sur les ${src.machines.length} de la table.`,
   _keying:
     "Indexe par les 5 DERNIERS caracteres du product_code — c'est la cle que l'app utilise elle-meme (DefaultsTable.getDefaultValuesForMachine), et ce sont les 5 caracteres que la machine publie dans d270_serialnumber.",
   _noRecipes:

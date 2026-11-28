@@ -1,7 +1,10 @@
 # Intégration continue : le projet n'a pas de suite de tests (les changements de protocole sont
 # validés en direct sur la vraie machine), donc la CI vérifie ce qu'elle peut vérifier sans
-# cafetière : les types, la syntaxe ET le lint des modules ESM, les douze vérifications pures, le
-# catalogue de messages, le build Next, les surfaces dans un vrai navigateur (APRÈS le build, dont
+# cafetière : les types, la syntaxe ET le lint des modules ESM, les dix-sept vérifications pures
+# (scripts/verif-* : tasks, monitor, lansession, proprietes, apps, args, trame-boisson, transfert,
+# compteurs, messages, contraste, images, beansync, bean-adapt, datum-grains, store,
+# machine-models), le rejeu hors réseau du relevé Bean Adapt, le catalogue de messages, le build
+# Next, le serveur MCP de bout en bout, les surfaces dans un vrai navigateur (APRÈS le build, dont
 # elles dépendent), la base SQLite, et le fait que l'image Docker démarre et répond.
 name: CI
 
@@ -42,6 +45,20 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
+
+      # Deux sources pour UNE version de pnpm : `packageManager` (la CI, Corepack) et
+      # docker/pnpm/package.json (l'image, installée par `npm ci`). Rien ne les lie : une mise à jour
+      # qui n'en touche qu'une construit l'image avec un autre pnpm que celui que la CI a vérifié.
+      - name: Vérifier que docker/pnpm suit packageManager
+        run: |
+          node -e "
+            const pm = require('./package.json').packageManager ?? '';
+            const m = /^pnpm@([^+]+)/.exec(pm);
+            if (!m) throw new Error('packageManager illisible : ' + JSON.stringify(pm));
+            const docker = require('./docker/pnpm/package.json').dependencies?.pnpm;
+            if (docker !== m[1]) throw new Error('packageManager = pnpm@' + m[1] + ', docker/pnpm/package.json = ' + JSON.stringify(docker));
+            console.log('pnpm', m[1], 'des deux côtés');
+          "
 
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
@@ -208,6 +225,15 @@ jobs:
       - name: Vérifier le reniflage d'une photo de grain
         run: node scripts/verif-datum-grains.ts
 
+      - name: Vérifier le module de stockage
+        run: node scripts/verif-store.ts
+
+      # L'identification du modèle depuis le numéro de série (caractères 1 à 5 → table générée de
+      # l'APK). Un décalage d'un caractère ne lève rien : il rend un autre modèle, donc un autre
+      # catalogue de boissons.
+      - name: Vérifier l'identification des modèles
+        run: node scripts/verif-machine-models.ts
+
       # Une variable vide désactive la couverture : Node ne la lit que si elle est non vide.
       - name: Build
         run: pnpm build
@@ -224,7 +250,7 @@ jobs:
       - name: Vérifier le serveur MCP (catalogue, authentification, portée)
         run: node scripts/verif-mcp.ts
 
-      # Les surfaces, dans un vrai navigateur — la seule chose que ni tsc, ni oxlint, ni les onze
+      # Les surfaces, dans un vrai navigateur — la seule chose que ni tsc, ni oxlint, ni les dix-sept
       # vérifications pures ne regardent. Il existe pour la migration vers shadcn : le piège de
       # focus d'un <dialog>, la fermeture par Échap et l'échelle imprimée d'un curseur étaient des
       # propriétés de la PLATEFORME et deviennent du code, donc des choses à prouver.

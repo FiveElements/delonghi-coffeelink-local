@@ -192,10 +192,33 @@ function visiterCommeAppareil() {
 // être une adresse de boucle locale (`serverIpProblem`) — 192.0.2.1 (TEST-NET-1, RFC 5737) n'est
 // jamais routable, donc jamais confondue avec une vraie adresse d'hôte ; `fausse-machine.ts` ne
 // la lit pas, il vise `--serveur 127.0.0.1:$PORT` en direct.
-const srv = spawn(process.execPath, ["server.ts"], {
-  env: { ...process.env, DATA_DIR: DIR, SERVER_PORT: String(PORT), LANIP_KEY: CLE_LAN, MACHINE_IP: "127.0.0.1", SERVER_IP: "192.0.2.1" },
-  stdio: "ignore",
+//
+// ⚠️ **`server.ts` complète toute variable ABSENTE (ou vide) depuis `.env.local` du répertoire
+// courant** — celui du développeur, ici, puisque le cwd n'est pas jetable (Next cherche `.next/`
+// dans le répertoire courant). `ENV_FILE` pointe donc vers un fichier INEXISTANT du dossier
+// temporaire : plus rien n'est lu, et les valeurs neutres qu'il fallait poser une à une contre
+// `.env.local` (`PROXY_APPS`, `LANIP_KEY_ID`, `MACHINE_GENERATION`) retombent sur les défauts de
+// server.ts — qui sont la poignée de main que `fausse-machine.ts` attend. `DATABASE_FILE` reste
+// posée quand même : c'est la plus grave (elle l'emporte sur `DATA_DIR` dans store.ts, et ce test
+// aurait écrit ses jetons dans la VRAIE base), elle ne doit pas dépendre d'une seule ligne.
+//
+// La sortie du serveur est CAPTURÉE (bornée à sa fin) et imprimée en cas d'échec : avec
+// `stdio: "ignore"`, un serveur qui plantait au démarrage ne laissait qu'un « ne répond pas ».
+const srv = spawn(process.execPath, [join(RACINE_DEPOT, "server.ts")], {
+  cwd: RACINE_DEPOT,
+  env: {
+    ...process.env, DATA_DIR: DIR, DATABASE_FILE: join(DIR, "lan-server.db"), SERVER_PORT: String(PORT),
+    ENV_FILE: join(DIR, "absent.env"), LANIP_KEY: CLE_LAN, MACHINE_IP: "127.0.0.1", SERVER_IP: "192.0.2.1",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
 });
+const SORTIE_MAX = 64 * 1024;
+let sortieServeur = "";
+const garder = (d: Buffer) => { sortieServeur = (sortieServeur + d).slice(-SORTIE_MAX); };
+srv.stdout.on("data", garder);
+srv.stderr.on("data", garder);
+let codeServeur: number | null | undefined;
+srv.on("exit", (code) => { codeServeur = code; });
 
 try {
   if (!(await attendre())) throw new Error(`le serveur de test ne répond pas sur ${BASE}`);
@@ -276,6 +299,11 @@ try {
   }
 
   console.log("OK: authentification, portée par jeton et start_beverage bout-en-bout, round-trip de chiffrement vérifié côté appareil");
+} catch (e) {
+  console.error(`--- sortie du serveur de test${codeServeur !== undefined ? ` (sorti avec le code ${codeServeur})` : ""}, fin conservée ---`);
+  console.error(sortieServeur || "(rien)");
+  console.error("--- fin de la sortie du serveur ---");
+  throw e;
 } finally {
   srv.kill();
   // SQLite garde le fichier ouvert un instant après la mort du processus, et Windows refuse alors
