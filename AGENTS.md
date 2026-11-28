@@ -158,12 +158,13 @@ request: `/ota_status.json` + `/local_lan/lan_ota` (logged, never served), `/reg
 `/local_reg.json` (only when the multiplexer is on), `/local_lan/*` (device-facing), `/api/*`
 (control API, ~35 endpoints). Everything else falls through to the Next handler — **pages only**.
 
-### Shadowed code: do not edit it expecting an effect
+### No Next route handlers — on purpose
 
-`src/app/api/*/route.ts` and `src/app/local_lan/**/route.ts`, plus the `src/lib/*.ts` they import
-(`config.ts`, `session.ts`, `crypto.ts`, `ecam.ts`, `machine.ts`, `program.ts`, `recipes.ts`,
-`keepalive.ts`), are **dead at runtime** — `server.mjs` intercepts those paths first. They still
-type-check, so they look alive. The live implementations are the `.mjs` siblings.
+There used to be `src/app/api/*/route.ts`, `src/app/local_lan/**/route.ts` and the `src/lib/*.ts`
+they imported (`config`, `session`, `crypto`, `ecam`, `machine`, `program`, `recipes`,
+`keepalive`): an early port, **dead at runtime** because `server.mjs` intercepts those paths first,
+yet type-checking so they looked alive. They were deleted. Do not add a `route.ts` under `/api` or
+`/local_lan` — it would never run.
 
 ### `src/lib` — the pure core
 

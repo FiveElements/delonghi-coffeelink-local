@@ -773,7 +773,7 @@ export default function Dashboard() {
       {/* **Le panneau qui manquait, à la place d'une table qui ne pouvait rien afficher.**
           Ici se trouvait « File de commandes », qui lisait `status.queue` — un champ que
           `/api/status` n'a jamais renvoyé. Cette forme (`label` / `needsAck` / `queuedAt`) vient de
-          `src/lib/session.ts`, une des copies fantômes qui ne tournent pas : `server.mjs` n'a pas de
+          `src/lib/session.ts`, une des copies fantômes (supprimées depuis) qui ne tournaient pas : `server.mjs` n'a pas de
           file de commandes ECAM, il tient UNE trame en vol (`m.program`) et une file de LECTURES
           (`m.import`). La table annonçait donc « Aucune commande en attente » cent pour cent du
           temps, balayage des grains compris.

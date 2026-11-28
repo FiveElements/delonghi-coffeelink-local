@@ -40,7 +40,7 @@
     "no-undef": "error",
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "error",
-    // `new Array(n).fill(0)` est l'idiome des constructeurs de trames (`server.mjs`, `ecam.ts`) :
+    // `new Array(n).fill(0)` est l'idiome des constructeurs de trames (`server.mjs`) :
     // `n` y est toujours un entier calculé, l'ambiguïté que la règle redoute n'existe pas.
     "unicorn/no-new-array": "off",
     // Les trois suivantes sont des règles du React Compiler, que ce projet n'active pas. Elles

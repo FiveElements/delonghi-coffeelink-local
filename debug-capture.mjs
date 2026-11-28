@@ -17,7 +17,7 @@ if (!LAN_KEY.length || !LAN_KEY_ID || !DSN || !MACHINE_IP || !SERVER_IP)
 const ts = () => new Date().toISOString().slice(11, 23);
 const log = (...a) => console.log(ts(), ...a);
 
-// --- crypto (port de src/lib/crypto.ts) ---
+// --- crypto (port de src/lib/crypto.ts, supprimé depuis avec le code shadowed) ---
 const hmac = (k, d) => crypto.createHmac("sha256", k).update(d).digest();
 // MODE=double : HMAC(K, HMAC(K,seed)||seed) (ce que montre le SDK décompilé)
 // MODE=single : HMAC(K, seed)              (implémentations Ayla publiques)

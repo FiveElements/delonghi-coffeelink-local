@@ -153,8 +153,8 @@ sources coexistent, de disponibilité opposée :
   introduire un second format) et stockées dans la base locale. Elles ne quittent jamais le LAN —
   l'application officielle, elle, met la sienne dans un datum Ayla, donc dans le cloud.
 
-**Contraintes techniques du dépôt :** `server.mjs` est le seul runtime — les handlers sous
-`src/app/api/**` et `src/app/local_lan/**` sont masqués et morts à l'exécution. **Aucune suite de
+**Contraintes techniques du dépôt :** `server.mjs` est le seul runtime — il n'y a aucun handler
+de route Next (`src/app/api/**`, `src/app/local_lan/**` : supprimés, ils étaient morts à l'exécution). **Aucune suite de
 tests** : les changements de protocole se valident en direct contre la machine, et ce qui est
 prouvable sans elle l'est par 7 scripts autonomes (`scripts/verif-*.mjs`) parce que les modules
 qu'ils couvrent sont purs.
